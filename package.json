@@ -1,0 +1,14 @@
+{
+  "name": "nba-lab",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Dashboard de estatisticas da NBA com ultimos 10 jogos, graficos e analise de combos para over/under.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "build": "node build.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,5 @@
+node_modules/
+cache/
+shot-*.png
+*.log
+.DS_Store

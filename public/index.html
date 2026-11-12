@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NBA Lab — Dashboard de Estatísticas</title>
+  <meta name="description" content="Dashboard de análise de estatísticas da NBA: últimos 10 jogos, gráficos, combos e tendências." />
+  <meta name="theme-color" content="#f97316" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="NBA Lab" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏀</text></svg>" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6">
+            <circle cx="12" cy="12" r="9"></circle>
+            <path d="M3 12h18M12 3v18M5.6 5.6c3.3 2.1 5.4 5.7 5.4 9.4M18.4 5.6c-3.3 2.1-5.4 5.7-5.4 9.4"></path>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <strong>NBA LAB</strong>
+          <span>análise &amp; tendências</span>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-item active" data-view="overview">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+          <span>Visão geral</span>
+        </button>
+        <button class="nav-item" data-view="teams">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l7 3v5c0 4.4-2.9 8.2-7 10-4.1-1.8-7-5.6-7-10V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>
+          <span>Times</span>
+        </button>
+        <button class="nav-item" data-view="players">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+          <span>Jogadores</span>
+        </button>
+        <button class="nav-item" data-view="combos">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 6h16M4 12h10M4 18h7"/><circle cx="18" cy="13" r="2.4"/><circle cx="15" cy="19" r="2.4"/></svg>
+          <span>Combos</span>
+        </button>
+        <button class="nav-item" data-view="compare">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3v18M5 7l-2 5h4L5 7zM19 7l-2 5h4l-2-5z"/><path d="M4 17h4M16 17h4"/></svg>
+          <span>Comparador</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="data-pill"><span class="dot"></span> Dados ESPN · <b id="season-label">—</b></div>
+        <p>Estatísticas apenas para análise. Aposte com responsabilidade · +18</p>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1 id="page-title">Visão geral</h1>
+          <p id="page-sub">Jogos do dia, odds e tendências da temporada.</p>
+        </div>
+        <div class="topbar-right">
+          <span class="pill" id="today-label"></span>
+          <span class="status-dot" id="status-dot" title="API online"></span>
+        </div>
+      </header>
+
+      <!-- ============================ VISÃO GERAL ============================ -->
+      <section id="view-overview" class="view active">
+        <div class="hero card">
+          <div class="hero-copy">
+            <span class="eyebrow">Central de análise</span>
+            <h2>Últimos 10 jogos.<br /><span class="grad-text">Tudo em gráficos.</span></h2>
+            <p>Compare times, investigue jogadores e teste linhas de combos com média, mediana, aproveitamento e tendência — sem planilhas.</p>
+            <div class="hero-actions">
+              <button class="btn primary" data-goto="teams">Analisar um time</button>
+              <button class="btn ghost" data-goto="players">Analisar um jogador</button>
+            </div>
+          </div>
+          <div class="hero-side">
+            <div class="hero-stat"><span>Times</span><strong>30</strong><small>temporada completa</small></div>
+            <div class="hero-stat"><span>Métricas</span><strong>25+</strong><small>por jogo e por jogador</small></div>
+            <div class="hero-stat"><span>Combos</span><strong>10</strong><small>PRA, PR, PA, RA…</small></div>
+          </div>
+        </div>
+
+        <div class="section-head">
+          <h3>Jogos de hoje</h3>
+          <span class="hint" id="slate-updated"></span>
+        </div>
+        <div id="slate-grid" class="slate-grid">
+          <div class="skeleton-card"></div>
+          <div class="skeleton-card"></div>
+          <div class="skeleton-card"></div>
+        </div>
+
+        <div class="grid two mt">
+          <div class="card info-card">
+            <div class="info-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 17l5-6 4 4 4-7 5 5"/><path d="M3 21h18"/></svg>
+            </div>
+            <div>
+              <h4>Como usar na análise</h4>
+              <p>Comece pelo <b>perfil do time</b> (ritmo, pontos e arremessos), entre nos <b>destaques individuais</b> e valide a linha do jogador na aba <b>Combos</b>.</p>
+            </div>
+          </div>
+          <div class="card info-card">
+            <div class="info-icon teal">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg>
+            </div>
+            <div>
+              <h4>Dados oficiais</h4>
+              <p>Boxscores, calendário e escalações vêm da API pública da ESPN. O cache local deixa as consultas rápidas depois da primeira carga.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ TIMES ============================ -->
+      <section id="view-teams" class="view">
+        <div class="control-bar card">
+          <label class="field">
+            <span>Time</span>
+            <select id="team-select"></select>
+          </label>
+          <label class="field">
+            <span>Comparar com</span>
+            <select id="team-compare-select"></select>
+          </label>
+          <label class="field small">
+            <span>Período</span>
+            <select id="team-last">
+              <option value="10" selected>Últimos 10</option>
+              <option value="5">Últimos 5</option>
+              <option value="15">Últimos 15</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="team-header" class="entity-head"></div>
+        <div id="team-kpis" class="kpi-grid"></div>
+
+        <div class="grid two">
+          <div class="card chart-card">
+            <div class="card-head">
+              <div><h3>Pontos por jogo</h3><span class="hint">Marcados, sofridos e margem</span></div>
+            </div>
+            <div class="chart-box tall"><canvas id="chart-team-points"></canvas></div>
+          </div>
+          <div class="card chart-card">
+            <div class="card-head">
+              <div><h3>Como os pontos são construídos</h3><span class="hint">Cestas de 2, de 3 e lances livres</span></div>
+            </div>
+            <div class="chart-box tall"><canvas id="chart-team-scoring"></canvas></div>
+          </div>
+          <div class="card chart-card">
+            <div class="card-head">
+              <div><h3>Estatísticas por jogo</h3><span class="hint">Selecione as métricas</span></div>
+            </div>
+            <div class="chip-row" id="team-stat-toggles"></div>
+            <div class="chart-box tall"><canvas id="chart-team-stats"></canvas></div>
+          </div>
+          <div class="card chart-card">
+            <div class="card-head">
+              <div><h3>Perfil do confronto</h3><span class="hint" id="radar-hint">Médias no período, normalizadas</span></div>
+            </div>
+            <div class="chart-box tall"><canvas id="chart-team-radar"></canvas></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div><h3>Jogos do período</h3><span class="hint">Do mais recente para o mais antigo</span></div>
+          </div>
+          <div class="table-wrap" id="team-games-table"></div>
+        </div>
+
+        <div class="section-head">
+          <h3>Destaques individuais</h3>
+          <span class="hint">Médias no período · clique para abrir o jogador</span>
+        </div>
+        <div id="team-leaders" class="leaders-grid"></div>
+      </section>
+
+      <!-- ============================ JOGADORES ============================ -->
+      <section id="view-players" class="view">
+        <div class="card picker-bar">
+          <div class="picker" id="player-picker">
+            <div class="search-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+              <input type="text" placeholder="Busque um jogador (ex.: Luka Doncic, LeBron James…)" autocomplete="off" spellcheck="false" />
+              <div class="search-results"></div>
+            </div>
+          </div>
+          <select id="player-last" class="inline-select">
+            <option value="10" selected>Últimos 10 jogos</option>
+            <option value="5">Últimos 5 jogos</option>
+            <option value="15">Últimos 15 jogos</option>
+          </select>
+        </div>
+
+        <div id="player-header" class="entity-head"></div>
+        <div id="player-kpis" class="kpi-grid"></div>
+
+        <div class="grid two">
+          <div class="card chart-card">
+            <div class="card-head"><div><h3>Pontos, rebotes e assistências</h3><span class="hint">Jogo a jogo</span></div></div>
+            <div class="chart-box tall"><canvas id="chart-player-scoring"></canvas></div>
+          </div>
+          <div class="card chart-card">
+            <div class="card-head"><div><h3>PRA por jogo</h3><span class="hint">Pontos + rebotes + assistências</span></div></div>
+            <div class="chart-box tall"><canvas id="chart-player-pra"></canvas></div>
+          </div>
+          <div class="card chart-card">
+            <div class="card-head"><div><h3>Composição dos pontos</h3><span class="hint">Total do período</span></div></div>
+            <div class="chart-box"><canvas id="chart-player-shots"></canvas></div>
+          </div>
+          <div class="card chart-card">
+            <div class="card-head"><div><h3>Eficiência de arremesso</h3><span class="hint">TS% e eFG% por jogo</span></div></div>
+            <div class="chart-box"><canvas id="chart-player-eff"></canvas></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><div><h3>Desempenho jogo a jogo</h3><span class="hint">Últimos jogos da temporada regular</span></div></div>
+          <div class="table-wrap" id="player-games-table"></div>
+        </div>
+      </section>
+
+      <!-- ============================ COMBOS ============================ -->
+      <section id="view-combos" class="view">
+        <div class="card picker-bar combo-bar">
+          <div class="picker" id="combo-picker">
+            <div class="search-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+              <input type="text" placeholder="Busque um jogador para analisar o combo…" autocomplete="off" spellcheck="false" />
+              <div class="search-results"></div>
+            </div>
+          </div>
+          <label class="field">
+            <span>Combo</span>
+            <select id="combo-type"></select>
+          </label>
+          <div class="field line-field">
+            <span>Linha (over/under)</span>
+            <div class="stepper">
+              <button type="button" class="step" data-step="-0.5">−</button>
+              <input type="number" id="combo-line" step="0.5" min="0" value="28.5" />
+              <button type="button" class="step" data-step="0.5">+</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="combo-header" class="entity-head compact"></div>
+        <div id="combo-kpis" class="kpi-grid"></div>
+
+        <div class="card chart-card">
+          <div class="card-head">
+            <div><h3 id="combo-chart-title">Valor do combo por jogo</h3><span class="hint" id="combo-chart-hint">Verde = acima da linha · vermelho = abaixo</span></div>
+            <div id="combo-legend" class="mini-legend"></div>
+          </div>
+          <div class="chart-box tall"><canvas id="chart-combo"></canvas></div>
+        </div>
+
+        <div class="grid two">
+          <div class="card">
+            <div class="card-head"><div><h3>Leitura da linha</h3><span class="hint">Resumo dos últimos jogos</span></div></div>
+            <div id="combo-insight" class="insight"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><div><h3>Distribuição</h3><span class="hint">Frequência dos valores</span></div></div>
+            <div class="chart-box small"><canvas id="chart-combo-dist"></canvas></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><div><h3>Jogo a jogo vs linha</h3><span class="hint" id="combo-table-hint"></span></div></div>
+          <div class="table-wrap" id="combo-table"></div>
+        </div>
+      </section>
+
+      <!-- ============================ COMPARADOR ============================ -->
+      <section id="view-compare" class="view">
+        <div class="compare-bar card">
+          <div class="picker" id="cmp-a-picker">
+            <div class="search-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+              <input type="text" placeholder="Jogador A…" autocomplete="off" spellcheck="false" />
+              <div class="search-results"></div>
+            </div>
+          </div>
+          <div class="vs-badge">VS</div>
+          <div class="picker" id="cmp-b-picker">
+            <div class="search-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+              <input type="text" placeholder="Jogador B…" autocomplete="off" spellcheck="false" />
+              <div class="search-results"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="cmp-head" class="cmp-head"></div>
+
+        <div class="grid two">
+          <div class="card chart-card">
+            <div class="card-head"><div><h3>Perfil comparado</h3><span class="hint">Médias dos últimos 10 jogos</span></div></div>
+            <div class="chart-box tall"><canvas id="chart-cmp-radar"></canvas></div>
+          </div>
+          <div class="card chart-card">
+            <div class="card-head"><div><h3>PRA jogo a jogo</h3><span class="hint">Cada linha é um jogador</span></div></div>
+            <div class="chart-box tall"><canvas id="chart-cmp-pra"></canvas></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><div><h3>Médias frente a frente</h3><span class="hint">Melhor valor em destaque</span></div></div>
+          <div class="table-wrap" id="cmp-table"></div>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <span>NBA LAB · dados via ESPN</span>
+        <span>Este painel não faz previsões. Use as estatísticas como parte da sua análise.</span>
+      </footer>
+    </main>
+  </div>
+
+  <script src="./vendor/chart.umd.min.js"></script>
+  <script src="./api-client.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
