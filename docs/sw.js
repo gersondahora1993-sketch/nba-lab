@@ -1,5 +1,5 @@
-/* NBA Lab — service worker (shell offline + atualização automática) */
-const CACHE = 'nba-lab-shell-v1';
+/* GS NBA PRO — service worker (shell offline + atualização automática) */
+const CACHE = 'gs-nba-pro-shell-v2';
 const ASSETS = [
   './',
   './index.html',

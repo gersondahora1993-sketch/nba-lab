@@ -1,6 +1,6 @@
-# NBA LAB — Dashboard de estatísticas
+# GS NBA PRO — Dashboard de estatísticas e probabilidades
 
-Dashboard para analisar os **últimos 10 jogos da NBA** com gráficos: produção dos times, desempenho dos jogadores e combos (PRA, PR, PA, RA, PTS+3PM, STL+BLK) contra linhas de over/under.
+Dashboard para analisar os **últimos 10 jogos da NBA** com gráficos: produção dos times, desempenho dos jogadores, combos (PRA, PR, PA, RA, PTS+3PM, STL+BLK) contra linhas de over/under e **sugestões automáticas de props com probabilidade estimada**.
 
 Os dados vêm da **API pública da ESPN** (boxscores, calendário e escalações), sem precisar de chave de API. O app roda 100% no navegador e pode ser instalado no Windows e no Android.
 
@@ -17,7 +17,7 @@ Os dados vêm da **API pública da ESPN** (boxscores, calendário e escalações
 O instalador cria dois atalhos: um na **Área de Trabalho** e outro na pasta **Inicialização** (abre junto com o Windows).
 
 1. Dê **duplo clique em `instalar_windows.bat`**.
-2. Abra pelo atalho **NBA Lab** na Área de Trabalho.
+2. Abra pelo atalho **GS NBA PRO** na Área de Trabalho.
 
 O atalho abre o app em uma janela própria do Edge, sem barra de endereço, já em tela cheia de trabalho.
 
@@ -31,7 +31,7 @@ Para **desativar a abertura automática**, dê duplo clique em `remover_autostar
 
 1. Abra o link do app no **Chrome** do celular (ou escaneie o QR code acima).
 2. Toque no menu **⋮** e escolha **Instalar app** / **Adicionar à tela inicial**.
-3. Confirme. O ícone do **NBA Lab** aparece na tela inicial e abre em tela cheia, como um app.
+3. Confirme. O ícone do **GS NBA PRO** aparece na tela inicial e abre em tela cheia, como um app.
 
 Requisitos: Chrome atualizado e conexão com a internet. O app funciona em HTTPS (GitHub Pages) e guarda os dados já consultados para abrir mais rápido.
 
@@ -40,8 +40,18 @@ Requisitos: Chrome atualizado e conexão com a internet. O app funciona em HTTPS
 ## O que tem no dashboard
 
 ### Visão geral
+- **Radar de apostas GS NBA PRO**: melhores sugestões de props do dia com linha, probabilidade estimada e gráfico comparativo.
+- **Melhores jogadores em ação**: destaques das equipes que jogam no dia, com médias de pontos, rebotes, assistências e cestas de 3.
 - Jogos do dia com **spread, total e moneyline** (quando disponíveis).
+- Cada jogo recebe um **banner automático de sugestão** (jogador, linha, probabilidade e médias) e o ícone de aposta ao lado do status.
 - Atalhos para as análises.
+
+### Como a sugestão é calculada
+- São usados os **últimos 10 jogos** de cada atleta das equipes que jogam no dia.
+- A linha sugerida é conservadora (percentil 35 da amostra, arredondado para `.5`).
+- A probabilidade combina **aproveitamento histórico**, **modelo normal** (média e desvio padrão) e **forma dos últimos 5 jogos**.
+- A força da sugestão também considera consistência e produção geral (PRA) do jogador.
+- É uma estimativa estatística, **não uma garantia** de resultado.
 
 ### Times
 - Seletor dos 30 times e **comparação com adversário**.
@@ -75,7 +85,7 @@ Combos disponíveis: **PRA**, PTS+REB, PTS+AST, REB+AST, pontos, rebotes, assist
 
 ## Fonte dos dados e cache
 
-- `https://site.web.api.espn.com` — jogos, boxscores, calendário, escalações e log dos jogadores.
+- `https://site.web.api.espn.com` — jogos, boxscores, calendário, escalações, log e médias dos jogadores.
 - `https://sports.core.api.espn.com` — dados do atleta e do time.
 - `https://a.espncdn.com` — logos e fotos.
 

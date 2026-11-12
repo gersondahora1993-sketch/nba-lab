@@ -1,7 +1,7 @@
 {
-  "name": "NBA Lab — Estatísticas NBA",
-  "short_name": "NBA Lab",
-  "description": "Dashboard de estatísticas da NBA com últimos 10 jogos, gráficos e análise de combos.",
+  "name": "GS NBA PRO — Estatísticas e Probabilidades NBA",
+  "short_name": "GS NBA PRO",
+  "description": "Dashboard de estatísticas da NBA com últimos 10 jogos, gráficos, sugestões de props e probabilidades.",
   "lang": "pt-BR",
   "start_url": "./",
   "scope": "./",

@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NBA Lab — Dashboard de Estatísticas</title>
-  <meta name="description" content="Dashboard de análise de estatísticas da NBA: últimos 10 jogos, gráficos, combos e tendências." />
+  <title>GS NBA PRO — Dashboard de Estatísticas e Probabilidades</title>
+  <meta name="description" content="GS NBA PRO: dashboard de estatísticas da NBA com últimos 10 jogos, gráficos, sugestões de props e probabilidades para análise." />
   <meta name="theme-color" content="#f97316" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="NBA Lab" />
+  <meta name="apple-mobile-web-app-title" content="GS NBA PRO" />
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏀</text></svg>" />
@@ -26,8 +26,8 @@
           </svg>
         </div>
         <div class="brand-text">
-          <strong>NBA LAB</strong>
-          <span>análise &amp; tendências</span>
+          <strong>GS NBA PRO</strong>
+          <span>análise &amp; probabilidades</span>
         </div>
       </div>
 
@@ -56,7 +56,7 @@
 
       <div class="sidebar-foot">
         <div class="data-pill"><span class="dot"></span> Dados ESPN · <b id="season-label">—</b></div>
-        <p>Estatísticas apenas para análise. Aposte com responsabilidade · +18</p>
+        <p>Estatísticas e probabilidades estimadas. Aposte com responsabilidade · +18</p>
       </div>
     </aside>
 
@@ -64,7 +64,7 @@
       <header class="topbar">
         <div>
           <h1 id="page-title">Visão geral</h1>
-          <p id="page-sub">Jogos do dia, odds e tendências da temporada.</p>
+          <p id="page-sub">Jogos do dia, sugestões de props e probabilidades estimadas.</p>
         </div>
         <div class="topbar-right">
           <span class="pill" id="today-label"></span>
@@ -77,8 +77,8 @@
         <div class="hero card">
           <div class="hero-copy">
             <span class="eyebrow">Central de análise</span>
-            <h2>Últimos 10 jogos.<br /><span class="grad-text">Tudo em gráficos.</span></h2>
-            <p>Compare times, investigue jogadores e teste linhas de combos com média, mediana, aproveitamento e tendência — sem planilhas.</p>
+            <h2>Últimos 10 jogos.<br /><span class="grad-text">Probabilidades em gráficos.</span></h2>
+            <p>Compare times, investigue jogadores e veja sugestões automáticas de props com média, probabilidade, aproveitamento e tendência — sem planilhas.</p>
             <div class="hero-actions">
               <button class="btn primary" data-goto="teams">Analisar um time</button>
               <button class="btn ghost" data-goto="players">Analisar um jogador</button>
@@ -87,9 +87,37 @@
           <div class="hero-side">
             <div class="hero-stat"><span>Times</span><strong>30</strong><small>temporada completa</small></div>
             <div class="hero-stat"><span>Métricas</span><strong>25+</strong><small>por jogo e por jogador</small></div>
-            <div class="hero-stat"><span>Combos</span><strong>10</strong><small>PRA, PR, PA, RA…</small></div>
+            <div class="hero-stat"><span>Sugestões</span><strong>Auto</strong><small>props e probabilidades</small></div>
           </div>
         </div>
+
+        <section id="overview-radar" class="radar-section" hidden>
+          <div class="section-head">
+            <h3>Radar de apostas GS NBA PRO</h3>
+            <span class="hint" id="radar-hint">Probabilidades estimadas pelos últimos 10 jogos</span>
+          </div>
+          <div class="grid two">
+            <div class="card">
+              <div class="card-head">
+                <div>
+                  <h3>Melhores sugestões do dia</h3>
+                  <span class="hint">Linha conservadora + probabilidade estimada</span>
+                </div>
+                <span class="badge orange">auto</span>
+              </div>
+              <div id="radar-list" class="radar-list"></div>
+            </div>
+            <div class="card chart-card">
+              <div class="card-head">
+                <div>
+                  <h3>Probabilidades estimadas</h3>
+                  <span class="hint">Quanto maior, mais vezes o atleta superou a linha</span>
+                </div>
+              </div>
+              <div class="chart-box tall"><canvas id="chart-overview-probs"></canvas></div>
+            </div>
+          </div>
+        </section>
 
         <div class="section-head">
           <h3>Jogos de hoje</h3>
@@ -100,6 +128,12 @@
           <div class="skeleton-card"></div>
           <div class="skeleton-card"></div>
         </div>
+
+        <div class="section-head">
+          <h3>Melhores jogadores em ação</h3>
+          <span class="hint">Médias da temporada · clique para abrir a análise do jogador</span>
+        </div>
+        <div id="overview-stars" class="leaders-grid"></div>
 
         <div class="grid two mt">
           <div class="card info-card">
@@ -326,8 +360,8 @@
       </section>
 
       <footer class="footer">
-        <span>NBA LAB · dados via ESPN</span>
-        <span>Este painel não faz previsões. Use as estatísticas como parte da sua análise.</span>
+        <span>GS NBA PRO · dados via ESPN</span>
+        <span>Probabilidades estimadas pelo histórico. Não há garantia de resultado. Aposte com responsabilidade · +18</span>
       </footer>
     </main>
   </div>

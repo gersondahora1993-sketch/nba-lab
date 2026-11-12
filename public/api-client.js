@@ -1,5 +1,5 @@
 /*
- * NBA Lab — camada de dados 100% no navegador.
+ * GS NBA PRO — camada de dados 100% no navegador.
  * Busca os dados públicos da ESPN direto do cliente (CORS liberado),
  * normaliza e guarda cache no localStorage. Assim o app funciona
  * publicado (GitHub Pages) e instalado como PWA no Windows e Android.
@@ -111,7 +111,7 @@
   // --------------------------------------------------------------- cache
 
   const mem = new Map();
-  const PREFIX = 'nba-lab:v1:';
+  const PREFIX = 'gs-nba-pro:v1:';
 
   function readCache(key, ttl) {
     try {
@@ -265,6 +265,51 @@
         } : null,
         competitors,
       };
+    });
+  }
+
+  async function getLeagueLeaders() {
+    return cached(`league-leaders:${SEASON}`, 15 * 60 * 1000, async () => {
+      const url = `${ESPN_WEB}/statistics/byathlete?region=us&lang=en&contentorigin=espn&isqualified=true&page=1&limit=500&sort=offensive.avgPoints%3Adesc&season=${SEASON}`;
+      const json = await espn(url, 900, `byathlete:${SEASON}`);
+      const defs = Object.fromEntries((json.categories || []).map((cat) => [cat.name, cat.names || []]));
+
+      return (json.athletes || [])
+        .map((row) => {
+          const athlete = row.athlete || {};
+          const flat = {};
+          for (const category of row.categories || []) {
+            const names = defs[category.name] || [];
+            (category.values || []).forEach((value, index) => {
+              if (names[index]) flat[names[index]] = Number(value) || 0;
+            });
+          }
+          const team = TEAM_MAP.get(String(athlete.teamId || '')) || null;
+          return {
+            id: String(athlete.id || ''),
+            name: athlete.displayName || athlete.fullName || 'Jogador',
+            headshot: athlete.headshot?.href || `https://a.espncdn.com/i/headshots/nba/players/full/${athlete.id}.png`,
+            pos: athlete.position?.abbreviation || '',
+            teamId: String(athlete.teamId || ''),
+            teamAbbr: team?.abbr || athlete.teamShortName || '',
+            teamName: team?.name || athlete.teamName || '',
+            teamLogo: team?.logo || '',
+            gp: flat.gamesPlayed || 0,
+            min: round(flat.avgMinutes, 1),
+            pts: round(flat.avgPoints, 1),
+            reb: round(flat.avgRebounds, 1),
+            ast: round(flat.avgAssists, 1),
+            tpm: round(flat.avgThreePointFieldGoalsMade, 1),
+            stl: round(flat.avgSteals, 1),
+            blk: round(flat.avgBlocks, 1),
+            to: round(flat.avgTurnovers, 1),
+            pra: round((flat.avgPoints || 0) + (flat.avgRebounds || 0) + (flat.avgAssists || 0), 1),
+            fgPct: round(flat.fieldGoalPct, 1),
+            tpPct: round(flat.threePointFieldGoalPct, 1),
+          };
+        })
+        .filter((player) => player.id && player.teamId)
+        .sort((a, b) => b.pra - a.pra);
     });
   }
 
@@ -624,6 +669,53 @@
     });
   }
 
+  async function getPlayerSeries(playerId, last = 10) {
+    return cached(`series:${playerId}:${last}:${SEASON}`, 10 * 60 * 1000, async () => {
+      const log = await espn(
+        `${ESPN_WEB}/athletes/${playerId}/gamelog?season=${SEASON}`,
+        900,
+        `gamelog:${playerId}:${SEASON}`
+      );
+
+      const names = log?.names || [];
+      const indexOf = Object.fromEntries(names.map((name, index) => [name, index]));
+      const seasonType =
+        (log?.seasonTypes || []).find((s) => /regular season/i.test(s.displayName || '')) ||
+        (log?.seasonTypes || [])[0];
+      const rawEvents = (seasonType?.categories || []).flatMap((c) => c.events || []).slice(0, last);
+
+      const games = rawEvents.map((entry) => {
+        const stats = entry.stats || [];
+        const read = (name) => {
+          const index = indexOf[name];
+          return index === undefined ? 0 : Number(stats[index]) || 0;
+        };
+        const fg = pair(stats[indexOf['fieldGoalsMade-fieldGoalsAttempted']]);
+        const tp = pair(stats[indexOf['threePointFieldGoalsMade-threePointFieldGoalsAttempted']]);
+        const ft = pair(stats[indexOf['freeThrowsMade-freeThrowsAttempted']]);
+
+        const base = {
+          min: read('minutes'), pts: read('points'), reb: read('totalRebounds'),
+          ast: read('assists'), stl: read('steals'), blk: read('blocks'),
+          to: read('turnovers'),
+          fgm: fg[0], fga: fg[1], tpm: tp[0], tpa: tp[1], ftm: ft[0], fta: ft[1],
+        };
+        base.combos = playerCombo(base);
+        return { eventId: String(entry.eventId), stats: base };
+      });
+
+      const averages = {};
+      for (const key of ['pts', 'reb', 'ast', 'stl', 'blk', 'to', 'tpm']) {
+        averages[key] = round(average(games, (g) => g.stats[key]), 1);
+      }
+      averages.min = round(average(games, (g) => g.stats.min), 1);
+      averages.pra = round(average(games, (g) => g.stats.combos.pra), 1);
+      averages.gp = games.length;
+
+      return { playerId: String(playerId), season: SEASON_LABEL, games, averages };
+    });
+  }
+
   // ---------------------------------------------------------------- router
 
   async function request(path) {
@@ -651,6 +743,16 @@
 
     if (pathname === '/api/slate') {
       return { season: SEASON_LABEL, games: await getSlate() };
+    }
+
+    if (pathname === '/api/leaders') {
+      return { season: SEASON_LABEL, players: await getLeagueLeaders() };
+    }
+
+    const seriesMatch = pathname.match(/^\/api\/player-series\/(\d+)$/);
+    if (seriesMatch) {
+      const last = Math.min(Math.max(Number(url.searchParams.get('last') || 10), 1), 20);
+      return getPlayerSeries(seriesMatch[1], last);
     }
 
     const teamMatch = pathname.match(/^\/api\/team\/(\d+)$/);

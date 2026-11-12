@@ -42,8 +42,17 @@ const COMBO_DEFS = {
   pra3: { label: 'PRA + 3PM', long: 'PRA + cestas de 3', get: (s) => s.combos.pra3 },
 };
 
+const PROP_MARKETS = [
+  { key: 'pts', label: 'Pontos', short: 'PTS', minAvg: 10, minLine: 4.5, series: (s) => s.pts },
+  { key: 'pra', label: 'PRA', short: 'PRA', minAvg: 16, minLine: 9.5, series: (s) => s.combos.pra },
+  { key: 'reb', label: 'Rebotes', short: 'REB', minAvg: 4, minLine: 2.5, series: (s) => s.reb },
+  { key: 'ast', label: 'Assistências', short: 'AST', minAvg: 3, minLine: 1.5, series: (s) => s.ast },
+  { key: 'tpm', label: 'Cestas de 3', short: '3PM', minAvg: 1.5, minLine: 0.5, series: (s) => s.tpm },
+  { key: 'stocks', label: 'Roubos + Tocos', short: 'STL+BLK', minAvg: 1.5, minLine: 1.5, series: (s) => s.stl + s.blk },
+];
+
 const PAGE_META = {
-  overview: ['Visão geral', 'Jogos do dia, odds e tendências da temporada.'],
+  overview: ['Visão geral', 'Jogos do dia, sugestões de props e probabilidades estimadas.'],
   teams: ['Times', 'Últimos jogos, produção ofensiva, defesa e confrontos.'],
   players: ['Jogadores', 'Pontuação, rebotes, assistências e eficiência jogo a jogo.'],
   combos: ['Combos', 'Média, mediana e aproveitamento contra a linha de over/under.'],
@@ -71,6 +80,12 @@ const state = {
   compareIds: { a: null, b: null },
   compareData: { a: null, b: null },
   slateLoaded: false,
+  slateGames: [],
+  slateInsights: new Map(),
+  slateBestBets: [],
+  insightsToken: 0,
+  leaders: [],
+  leadersPromise: null,
 };
 
 let teamToken = 0;
@@ -80,6 +95,7 @@ let comboToken = 0;
 let compareToken = 0;
 let pluginSeq = 0;
 const charts = new Map();
+const seriesPromises = new Map();
 
 /* ============================================================== formatters */
 
@@ -148,6 +164,38 @@ function slope(values) {
     den += (x - meanX) ** 2;
   });
   return den ? num / den : 0;
+}
+
+function quantile(values, q) {
+  const arr = values.filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
+  if (!arr.length) return 0;
+  const pos = (arr.length - 1) * Math.min(Math.max(q, 0), 1);
+  const lower = Math.floor(pos);
+  const upper = Math.ceil(pos);
+  if (lower === upper) return arr[lower];
+  return arr[lower] + (arr[upper] - arr[lower]) * (pos - lower);
+}
+
+function normalCdf(z) {
+  const t = 1 / (1 + 0.2316419 * Math.abs(z));
+  const d = 0.3989423 * Math.exp((-z * z) / 2);
+  const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+  return z > 0 ? 1 - p : p;
+}
+
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) return;
+      out[index] = await fn(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return out;
 }
 
 function imageFallback(el) {
@@ -406,7 +454,9 @@ async function loadSlate() {
   try {
     const data = await api('/api/slate');
     state.slateLoaded = true;
-    renderSlate(data.games || []);
+    state.slateGames = data.games || [];
+    renderSlate(state.slateGames);
+    loadSlateInsights(state.slateGames);
   } catch (err) {
     grid.innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`;
   }
@@ -422,45 +472,423 @@ function renderSlate(games) {
   }
 
   const sorted = [...games].sort((a, b) => new Date(a.date) - new Date(b.date));
+  grid.innerHTML = sorted.map((game) => gameCardHtml(game)).join('');
+}
 
-  grid.innerHTML = sorted.map((game) => {
-    const away = game.competitors.find((c) => !c.home);
-    const home = game.competitors.find((c) => c.home);
-    const rows = [away, home].filter(Boolean);
-    const statusClass = game.status.completed ? 'final' : game.status.state === 'in' ? 'live' : '';
-    const statusText = game.status.completed ? 'Final' : game.status.state === 'in' ? 'Ao vivo' : game.status.detail || longDate(game.date);
-    const odds = game.odds;
+function gameCardHtml(game) {
+  const away = game.competitors.find((c) => !c.home);
+  const home = game.competitors.find((c) => c.home);
+  const rows = [away, home].filter(Boolean);
+  const statusClass = game.status.completed ? 'final' : game.status.state === 'in' ? 'live' : '';
+  const statusText = game.status.completed ? 'Final' : game.status.state === 'in' ? 'Ao vivo' : game.status.detail || longDate(game.date);
+  const odds = game.odds;
 
-    return `<article class="game-card">
-      <div class="game-top">
+  return `<article class="game-card">
+    <div class="game-top">
+      <span class="game-top-left">
         <span class="game-status ${statusClass}">${escapeHtml(statusText)}</span>
-        <span>${escapeHtml(game.venue || game.broadcast || '')}</span>
-      </div>
-      <div class="matchup">
-        ${rows
-          .map(
-            (team) => `<div class="team-row ${game.status.completed && !team.winner ? 'loser' : ''}">
-              <img src="${escapeHtml(team.logo)}" alt="" onerror="this.style.opacity='.2'" />
-              <span class="tname">
-                <strong>${escapeHtml(team.abbr)}</strong>
-                <small>${team.home ? 'CASA' : 'FORA'}${team.record ? ` · ${escapeHtml(team.record)}` : ''}</small>
-              </span>
-              <span class="score">${game.status.state === 'pre' ? '—' : team.score}</span>
-            </div>`
-          )
-          .join('')}
-      </div>
-      <div class="odds-row">
-        <div><span>Spread</span><strong>${odds && odds.details ? escapeHtml(odds.details) : '—'}</strong></div>
-        <div><span>Total</span><strong>${odds && odds.total != null ? fmt(odds.total, 1) : '—'}</strong></div>
-        <div><span>Moneyline</span><strong>${odds && (odds.awayMoney || odds.homeMoney) ? `${escapeHtml(odds.awayMoney || '—')} / ${escapeHtml(odds.homeMoney || '—')}` : '—'}</strong></div>
-      </div>
-      <div class="game-foot">
-        <span>${escapeHtml(game.odds?.provider || 'Odds indisponíveis')}</span>
-        <span>${longDate(game.date)}</span>
-      </div>
-    </article>`;
-  }).join('');
+        <span class="bet-flag" data-bet-flag="${game.id}"></span>
+      </span>
+      <span>${escapeHtml(game.venue || game.broadcast || '')}</span>
+    </div>
+    <div class="bet-slot pending" data-bet-slot="${game.id}">
+      <span class="bet-pending"><span class="spinner"></span>Calculando sugestão…</span>
+    </div>
+    <div class="matchup">
+      ${rows
+        .map(
+          (team) => `<div class="team-row ${game.status.completed && !team.winner ? 'loser' : ''}">
+            <img src="${escapeHtml(team.logo)}" alt="" onerror="this.style.opacity='.2'" />
+            <span class="tname">
+              <strong>${escapeHtml(team.abbr)}</strong>
+              <small>${team.home ? 'CASA' : 'FORA'}${team.record ? ` · ${escapeHtml(team.record)}` : ''}</small>
+            </span>
+            <span class="score">${game.status.state === 'pre' ? '—' : team.score}</span>
+          </div>`
+        )
+        .join('')}
+    </div>
+    <div class="stars-row" data-stars="${game.id}"></div>
+    <div class="odds-row">
+      <div><span>Spread</span><strong>${odds && odds.details ? escapeHtml(odds.details) : '—'}</strong></div>
+      <div><span>Total</span><strong>${odds && odds.total != null ? fmt(odds.total, 1) : '—'}</strong></div>
+      <div><span>Moneyline</span><strong>${odds && (odds.awayMoney || odds.homeMoney) ? `${escapeHtml(odds.awayMoney || '—')} / ${escapeHtml(odds.homeMoney || '—')}` : '—'}</strong></div>
+    </div>
+    <div class="game-foot">
+      <span>${escapeHtml(game.odds?.provider || 'Odds indisponíveis')}</span>
+      <span>${longDate(game.date)}</span>
+    </div>
+  </article>`;
+}
+
+function betIconSvg() {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>`;
+}
+
+function betBannerHtml(insight) {
+  const s = insight.suggestion;
+  if (!s) {
+    return '<div class="bet-empty">Sem sugestão com confiança suficiente para este jogo.</div>';
+  }
+  const stats = s.player;
+  return `<button type="button" class="bet-banner" data-player-id="${escapeHtml(s.player.id)}" data-player-name="${escapeHtml(s.player.name)}">
+    <span class="bet-head">
+      <span class="bet-icon">${betIconSvg()}</span>
+      <img class="bet-face" src="${escapeHtml(s.player.headshot)}" alt="" onerror="this.style.opacity='.15'" />
+      <span class="bet-copy">
+        <span class="bet-eyebrow">Sugestão GS NBA PRO</span>
+        <strong>${escapeHtml(s.player.name)} <span class="bet-team">${escapeHtml(s.player.teamAbbr || '')}</span></strong>
+        <span class="bet-market">Over <b>${fmt(s.line, 1)} ${escapeHtml(s.market.short)}</b> · <b class="bet-prob">${s.probability}%</b> de probabilidade</span>
+      </span>
+    </span>
+    <span class="bet-stats">
+      <span><b>${fmt(stats.pts, 1)}</b>PTS</span>
+      <span><b>${fmt(stats.reb, 1)}</b>REB</span>
+      <span><b>${fmt(stats.ast, 1)}</b>AST</span>
+      <span><b>${fmt(stats.tpm, 1)}</b>3PM</span>
+    </span>
+  </button>`;
+}
+
+function starsRowHtml(insight) {
+  if (!insight) return '';
+  return insight.sides
+    .map((side) => `<div class="stars-side">
+      <span class="stars-team">
+        <img src="${escapeHtml(side.team.logo)}" alt="" onerror="this.style.opacity='.15'" />
+        ${escapeHtml(side.team.abbr)} · destaques
+      </span>
+      ${side.top
+        .slice(0, 2)
+        .map((p) => `<button type="button" class="star-chip" data-player-id="${escapeHtml(p.id)}" data-player-name="${escapeHtml(p.name)}">
+          <img src="${escapeHtml(p.headshot)}" alt="" onerror="this.style.opacity='.15'" />
+          <span class="star-body">
+            <span class="star-name">${escapeHtml(p.name)}</span>
+            <span class="star-line">${fmt(p.pts, 1)} PTS · ${fmt(p.reb, 1)} REB · ${fmt(p.ast, 1)} AST · ${fmt(p.tpm, 1)} 3PM</span>
+          </span>
+        </button>`)
+        .join('')}
+    </div>`)
+    .join('');
+}
+
+function updateGameInsight(gameId) {
+  const insight = state.slateInsights.get(gameId);
+  const slot = $(`[data-bet-slot="${gameId}"]`);
+  if (slot) {
+    slot.classList.remove('pending');
+    slot.innerHTML = betBannerHtml(insight || {});
+  }
+  const stars = $(`[data-stars="${gameId}"]`);
+  if (stars) stars.innerHTML = starsRowHtml(insight);
+
+  const flag = $(`[data-bet-flag="${gameId}"]`);
+  if (flag) {
+    const best = insight?.suggestion;
+    flag.innerHTML = best
+      ? `<span class="bet-flag-on" title="Sugestão GS NBA PRO: ${escapeHtml(best.player.name)} over ${fmt(best.line, 1)} ${escapeHtml(best.market.short)} (${best.probability}%)">${betIconSvg()}</span>`
+      : '';
+  }
+}
+
+/* ============================================================ insights */
+/* Sugestões de props: média dos últimos 10 jogos, linha conservadora
+   (percentil 35) e probabilidade estimada por histórico + modelo normal. */
+
+function ensureLeagueLeaders() {
+  if (state.leaders.length) return Promise.resolve(state.leaders);
+  if (!state.leadersPromise) {
+    state.leadersPromise = api('/api/leaders')
+      .then((data) => {
+        state.leaders = data.players || [];
+        return state.leaders;
+      })
+      .catch(() => {
+        state.leaders = [];
+        return state.leaders;
+      });
+  }
+  return state.leadersPromise;
+}
+
+function fetchPlayerSeries(id) {
+  const key = String(id);
+  if (!seriesPromises.has(key)) {
+    seriesPromises.set(key, api(`/api/player-series/${key}?last=10`).catch(() => null));
+  }
+  return seriesPromises.get(key);
+}
+
+function buildPropSuggestions(player, series) {
+  const games = series?.games || [];
+  if (games.length < 5) return [];
+  const avg = series.averages || {};
+  const suggestions = [];
+
+  for (const market of PROP_MARKETS) {
+    const values = games.map((g) => market.series(g.stats)).filter((v) => Number.isFinite(v));
+    if (values.length < 5) continue;
+
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    if (mean < market.minAvg) continue;
+
+    const max = Math.max(...values);
+    if (max < 1) continue;
+
+    const q35 = quantile(values, 0.35);
+    const line = Math.max(market.minLine || 0.5, Math.floor(q35) - 0.5);
+    if (line >= max) continue;
+
+    const over = values.filter((v) => v > line).length;
+    const empirical = over / values.length;
+    const sd = Math.max(stdDev(values), 0.55);
+    const model = 1 - normalCdf((line - mean) / sd);
+    const last5 = values.slice(0, 5);
+    const recent = last5.length ? last5.filter((v) => v > line).length / last5.length : empirical;
+
+    let probability = 0.55 * empirical + 0.30 * model + 0.15 * recent;
+    probability = Math.min(0.90, Math.max(0.35, probability));
+    const pct = Math.round(probability * 100);
+    const cv = mean ? sd / mean : 1;
+    const confidence = pct >= 70 && cv <= 0.32 ? 'Alta' : pct >= 60 ? 'Média' : 'Baixa';
+    const score = pct + (1 - Math.min(cv, 0.7)) * 12 + Math.min((avg.pra || 0) / 15, 1.5) * 5 + empirical * 4;
+
+    suggestions.push({
+      market,
+      line,
+      probability: pct,
+      confidence,
+      score,
+      cv,
+      n: values.length,
+      mean,
+      player: {
+        id: player.id,
+        name: player.name,
+        headshot: player.headshot,
+        teamAbbr: player.teamAbbr,
+        teamName: player.teamName,
+        pts: avg.pts || 0,
+        reb: avg.reb || 0,
+        ast: avg.ast || 0,
+        tpm: avg.tpm || 0,
+        pra: avg.pra || 0,
+      },
+    });
+  }
+
+  return suggestions;
+}
+
+async function loadSlateInsights(games) {
+  if (!games || !games.length) return;
+  const token = ++state.insightsToken;
+  state.slateInsights.clear();
+  state.slateBestBets = [];
+
+  const section = $('#overview-radar');
+  if (section) section.hidden = true;
+
+  const leaders = await ensureLeagueLeaders();
+  if (token !== state.insightsToken) return;
+
+  if (!leaders.length) {
+    games.forEach((game) => updateGameInsight(game.id));
+    return;
+  }
+
+  const byTeam = new Map();
+  for (const player of leaders) {
+    const key = String(player.teamId);
+    if (!byTeam.has(key)) byTeam.set(key, []);
+    byTeam.get(key).push(player);
+  }
+  for (const list of byTeam.values()) list.sort((a, b) => b.pra - a.pra);
+
+  await mapLimit(games, 2, async (game) => {
+    if (token !== state.insightsToken) return;
+
+    const sides = [game.competitors.find((c) => !c.home), game.competitors.find((c) => c.home)]
+      .filter(Boolean)
+      .map((team) => ({ team, top: (byTeam.get(String(team.id)) || []).slice(0, 3) }));
+
+    const candidates = sides.flatMap((side) => side.top);
+    const seriesList = await mapLimit(candidates, 3, (player) => fetchPlayerSeries(player.id));
+    if (token !== state.insightsToken) return;
+
+    const seriesMap = new Map();
+    candidates.forEach((player, index) => seriesMap.set(player.id, seriesList[index]));
+
+    const suggestions = [];
+    const enrichedSides = sides.map((side) => ({
+      ...side,
+      top: side.top.map((player) => ({
+        ...player,
+        ...(seriesMap.get(player.id)?.averages || {}),
+      })),
+    }));
+
+    for (const player of candidates) {
+      const series = seriesMap.get(player.id);
+      if (series) suggestions.push(...buildPropSuggestions(player, series));
+    }
+    suggestions.sort((a, b) => b.score - a.score);
+
+    const insight = {
+      gameId: game.id,
+      sides: enrichedSides,
+      suggestion: suggestions[0] || null,
+    };
+    state.slateInsights.set(game.id, insight);
+    state.slateBestBets.push(...suggestions.slice(0, 2).map((s) => ({ ...s, gameId: game.id })));
+    updateGameInsight(game.id);
+  });
+
+  if (token !== state.insightsToken) return;
+  renderOverviewRadar();
+  renderOverviewStars();
+}
+
+function shortPlayerName(name) {
+  const parts = String(name || '').trim().split(/\s+/);
+  return parts.length > 1 ? parts[parts.length - 1] : parts[0] || '—';
+}
+
+function renderOverviewRadar() {
+  const section = $('#overview-radar');
+  if (!section) return;
+
+  const seenPlayers = new Set();
+  const bets = [...state.slateBestBets]
+    .sort((a, b) => b.score - a.score)
+    .filter((s) => {
+      if (seenPlayers.has(s.player.id)) return false;
+      seenPlayers.add(s.player.id);
+      return true;
+    })
+    .slice(0, 8);
+  if (!bets.length) {
+    section.hidden = true;
+    destroyCharts(['chart-overview-probs']);
+    return;
+  }
+
+  section.hidden = false;
+  const top = bets.slice(0, 6);
+  $('#radar-hint').textContent = `${top.length} sugestões · baseadas nos últimos 10 jogos`;
+
+  $('#radar-list').innerHTML = top.map((s, index) => `
+    <button type="button" class="radar-item" data-player-id="${escapeHtml(s.player.id)}" data-player-name="${escapeHtml(s.player.name)}">
+      <span class="radar-rank">${index + 1}</span>
+      <img src="${escapeHtml(s.player.headshot)}" alt="" onerror="this.style.opacity='.15'" />
+      <span class="radar-body">
+        <span class="radar-top">
+          <strong>${escapeHtml(s.player.name)}</strong>
+          <span class="badge blue">${escapeHtml(s.player.teamAbbr || 'NBA')}</span>
+          <span class="radar-prob">${s.probability}%</span>
+        </span>
+        <span class="radar-bet">Over ${fmt(s.line, 1)} ${escapeHtml(s.market.short)} · ${escapeHtml(s.market.label)}</span>
+        <span class="radar-stats">${fmt(s.player.pts, 1)} PTS · ${fmt(s.player.reb, 1)} REB · ${fmt(s.player.ast, 1)} AST · ${fmt(s.player.tpm, 1)} 3PM</span>
+        <span class="radar-bar"><i style="width:${s.probability}%"></i></span>
+      </span>
+    </button>`).join('');
+
+  renderOverviewProbChart(top);
+}
+
+function renderOverviewProbChart(bets) {
+  makeChart('chart-overview-probs', {
+    type: 'bar',
+    data: {
+      labels: bets.map((s) => `${shortPlayerName(s.player.name)} · ${s.market.short}`),
+      datasets: [{
+        data: bets.map((s) => s.probability),
+        backgroundColor: bets.map((s) => (
+          s.probability >= 70 ? 'rgba(34, 197, 94, 0.78)'
+            : s.probability >= 60 ? 'rgba(249, 115, 22, 0.82)'
+              : 'rgba(148, 163, 184, 0.42)'
+        )),
+        borderRadius: 5,
+        maxBarThickness: 22,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              const s = bets[ctx.dataIndex];
+              return ` ${s.player.name} · Over ${fmt(s.line, 1)} ${s.market.label}: ${s.probability}%`;
+            },
+            afterLabel: (ctx) => {
+              const s = bets[ctx.dataIndex];
+              return `${s.player.teamAbbr} · confiança ${s.confidence.toLowerCase()}`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          beginAtZero: true,
+          max: 100,
+          grid: GRID,
+          border: { display: false },
+          ticks: { callback: (value) => `${value}%`, padding: 6 },
+        },
+        y: {
+          grid: { display: false },
+          border: { display: false },
+          ticks: { color: '#cbd5e1', font: { size: 10, weight: '600' } },
+        },
+      },
+    },
+  });
+}
+
+function renderOverviewStars() {
+  const container = $('#overview-stars');
+  if (!container) return;
+
+  const teamIds = new Set((state.slateGames || []).flatMap((game) => game.competitors.map((c) => String(c.id))));
+  const list = state.leaders
+    .filter((player) => teamIds.has(String(player.teamId)))
+    .sort((a, b) => b.pra - a.pra)
+    .slice(0, 12);
+
+  if (!list.length) {
+    container.innerHTML = '<div class="empty" style="grid-column:1/-1">Carregando destaques das equipes…</div>';
+    return;
+  }
+
+  container.innerHTML = list.map((p) => `
+    <button type="button" class="leader" data-player-id="${escapeHtml(p.id)}" data-player-name="${escapeHtml(p.name)}">
+      <img src="${escapeHtml(p.headshot)}" alt="" onerror="this.style.opacity='.15'" />
+      <span class="l-main">
+        <span class="l-name">${escapeHtml(p.name)}</span>
+        <span class="l-sub">${escapeHtml(p.teamAbbr)} · ${fmt(p.pts, 1)} PTS · ${fmt(p.reb, 1)} REB · ${fmt(p.ast, 1)} AST · ${fmt(p.tpm, 1)} 3PM</span>
+      </span>
+      <span class="l-pra"><strong>${fmt(p.pra, 1)}</strong><span>PRA</span></span>
+    </button>`).join('');
+}
+
+function openPlayer(id, name) {
+  if (!id) return;
+  goTo('players');
+  if (playerPicker) playerPicker.setName(name || '');
+  loadPlayer(id);
+}
+
+function bindOverviewInteractions() {
+  document.addEventListener('click', (event) => {
+    const target = event.target.closest('[data-player-id]');
+    if (!target) return;
+    if (!target.closest('#overview-stars, #radar-list, #slate-grid')) return;
+    openPlayer(target.dataset.playerId, target.dataset.playerName);
+  });
 }
 
 /* ================================================================ teams */
@@ -1671,12 +2099,17 @@ async function init() {
   todayLabel();
   bindTeamInteractions();
   bindComboInteractions();
+  bindOverviewInteractions();
 
   playerPicker = setupPicker($('#player-picker'), (p) => loadPlayer(p.id));
   comboPicker = setupPicker($('#combo-picker'), (p) => loadComboPlayer(p.id));
   bindCompareInteractions();
 
   window.imageFallback = imageFallback;
+
+  ensureLeagueLeaders().then(() => {
+    if (state.slateGames.length) renderOverviewStars();
+  });
 
   $('#player-last').addEventListener('change', (event) => {
     state.playerLast = Number(event.target.value);

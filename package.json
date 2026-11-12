@@ -1,8 +1,8 @@
 {
-  "name": "nba-lab",
-  "version": "1.0.0",
+  "name": "gs-nba-pro",
+  "version": "1.1.0",
   "private": true,
-  "description": "Dashboard de estatisticas da NBA com ultimos 10 jogos, graficos e analise de combos para over/under.",
+  "description": "GS NBA PRO: dashboard de estatisticas da NBA com ultimos 10 jogos, graficos, sugestoes de props e probabilidades.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

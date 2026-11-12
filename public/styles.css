@@ -248,6 +248,103 @@ a { color: inherit; }
 .odds-row strong { font-size: 12px; font-variant-numeric: tabular-nums; }
 .game-foot { font-size: 10px; color: var(--muted-2); display: flex; justify-content: space-between; gap: 8px; }
 
+/* ----------------------------------------------------- sugestões de apostas */
+.game-top-left { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.bet-flag { display: none; }
+.bet-flag-on {
+  display: inline-grid; place-items: center;
+  width: 21px; height: 21px; border-radius: 7px;
+  color: #fff; background: linear-gradient(145deg, #fb923c, #ea580c);
+  box-shadow: 0 6px 16px -8px rgba(249, 115, 22, 0.9);
+}
+.bet-flag-on svg { width: 13px; height: 13px; }
+.bet-slot { min-height: 36px; }
+.bet-slot.pending { display: flex; align-items: center; }
+.bet-pending { font-size: 10.5px; color: var(--muted-2); }
+.bet-pending .spinner { width: 14px; height: 14px; }
+.bet-empty {
+  padding: 9px 11px; border-radius: 10px;
+  border: 1px dashed var(--line);
+  background: rgba(148, 163, 184, 0.04);
+  font-size: 10.5px; color: var(--muted-2);
+}
+.bet-banner {
+  display: flex; flex-direction: column; gap: 8px;
+  width: 100%; padding: 10px;
+  border: 1px solid rgba(249, 115, 22, 0.3);
+  border-radius: 12px;
+  background:
+    radial-gradient(220px 90px at 100% 0%, rgba(249, 115, 22, 0.16), transparent 70%),
+    linear-gradient(160deg, rgba(249, 115, 22, 0.07), rgba(15, 23, 42, 0.6));
+  color: var(--text); text-align: left; cursor: pointer;
+  transition: 150ms ease;
+}
+.bet-banner:hover { border-color: rgba(249, 115, 22, 0.55); transform: translateY(-1px); }
+.bet-head { display: flex; align-items: center; gap: 9px; width: 100%; }
+.bet-icon {
+  flex: none; width: 28px; height: 28px; border-radius: 9px;
+  display: grid; place-items: center;
+  color: var(--orange);
+  background: var(--orange-soft);
+  border: 1px solid rgba(249, 115, 22, 0.26);
+}
+.bet-icon svg { width: 16px; height: 16px; }
+.bet-face { flex: none; width: 38px; height: 38px; border-radius: 50%; object-fit: cover; background: rgba(148, 163, 184, 0.1); border: 1px solid rgba(249, 115, 22, 0.3); }
+.bet-copy { min-width: 0; flex: 1; }
+.bet-eyebrow { display: block; font-size: 8.5px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--orange); font-weight: 700; }
+.bet-copy strong { display: block; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bet-team { font-size: 9px; color: var(--muted-2); font-weight: 600; margin-left: 3px; }
+.bet-market { display: block; margin-top: 2px; font-size: 10.5px; color: var(--muted); }
+.bet-market b { color: #fff; }
+.bet-market .bet-prob { color: #4ade80; font-size: 12px; }
+.bet-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px;
+  width: 100%; padding-top: 7px; border-top: 1px dashed rgba(148, 163, 184, 0.16);
+}
+.bet-stats span { font-size: 8px; letter-spacing: 0.08em; color: var(--muted-2); text-transform: uppercase; text-align: center; }
+.bet-stats b { display: block; font-size: 12px; color: var(--text); letter-spacing: -0.01em; margin-bottom: 1px; }
+.stars-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
+.stars-row:empty { display: none; }
+.stars-side { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.stars-team { display: flex; align-items: center; gap: 5px; font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted-2); min-width: 0; }
+.stars-team img { width: 15px; height: 15px; object-fit: contain; }
+.star-chip {
+  display: flex; align-items: center; gap: 7px;
+  padding: 6px; border-radius: 9px;
+  border: 1px solid transparent;
+  background: rgba(148, 163, 184, 0.05);
+  color: var(--text); text-align: left; cursor: pointer; width: 100%;
+  transition: 140ms ease;
+}
+.star-chip:hover { border-color: rgba(249, 115, 22, 0.3); background: rgba(249, 115, 22, 0.06); }
+.star-chip img { width: 25px; height: 25px; border-radius: 50%; object-fit: cover; background: rgba(148, 163, 184, 0.1); flex: none; }
+.star-body { min-width: 0; }
+.star-name { display: block; font-size: 10px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.star-line { display: block; font-size: 8px; color: var(--muted-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+
+.radar-section { margin-top: 18px; }
+.radar-list { display: flex; flex-direction: column; gap: 8px; }
+.radar-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px; border-radius: 12px;
+  border: 1px solid var(--line);
+  background: linear-gradient(160deg, rgba(17, 26, 45, 0.72), rgba(9, 14, 24, 0.68));
+  color: var(--text); text-align: left; width: 100%; cursor: pointer;
+  transition: 150ms ease;
+}
+.radar-item:hover { border-color: rgba(249, 115, 22, 0.38); transform: translateY(-1px); }
+.radar-rank { flex: none; width: 20px; font-size: 11px; font-weight: 800; color: var(--orange); text-align: center; }
+.radar-item > img { flex: none; width: 38px; height: 38px; border-radius: 50%; object-fit: cover; background: rgba(148, 163, 184, 0.1); }
+.radar-body { flex: 1; min-width: 0; }
+.radar-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.radar-top strong { font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.radar-top .badge { padding: 2px 6px; font-size: 9px; }
+.radar-prob { margin-left: auto; font-size: 14px; font-weight: 800; color: #4ade80; letter-spacing: -0.03em; }
+.radar-bet { display: block; margin-top: 2px; font-size: 10.5px; font-weight: 600; color: var(--orange); }
+.radar-stats { display: block; margin-top: 2px; font-size: 9px; color: var(--muted-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.radar-bar { display: block; height: 4px; border-radius: 2px; background: rgba(148, 163, 184, 0.12); margin-top: 6px; overflow: hidden; }
+.radar-bar i { display: block; height: 100%; border-radius: 2px; background: linear-gradient(90deg, #fb923c, #22c55e); }
+
 /* ------------------------------------------------------------- info cards */
 .info-card { display: flex; gap: 14px; align-items: flex-start; }
 .info-icon {
@@ -530,4 +627,9 @@ td.strong { color: #fff; font-weight: 600; }
   .control-bar { gap: 10px; }
   .field { flex: 1 1 140px; min-width: 0; }
   .footer { padding-bottom: 10px; }
+}
+@media (max-width: 620px) {
+  .stars-row { grid-template-columns: 1fr; }
+  .radar-item { align-items: flex-start; }
+  .radar-prob { font-size: 13px; }
 }
