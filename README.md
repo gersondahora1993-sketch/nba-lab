@@ -1,26 +1,39 @@
 # NBA LAB — Dashboard de estatísticas
 
-Dashboard local para analisar os **últimos jogos da NBA** com gráficos: produção dos times, desempenho dos jogadores e combos (PRA, PR, PA, RA, PTS+3PM, STL+BLK) contra linhas de over/under.
+Dashboard para analisar os **últimos 10 jogos da NBA** com gráficos: produção dos times, desempenho dos jogadores e combos (PRA, PR, PA, RA, PTS+3PM, STL+BLK) contra linhas de over/under.
 
-Os dados vêm da **API pública da ESPN** (boxscores, calendário e escalações), sem precisar de chave de API.
+Os dados vêm da **API pública da ESPN** (boxscores, calendário e escalações), sem precisar de chave de API. O app roda 100% no navegador e pode ser instalado no Windows e no Android.
+
+## Link do app
+
+**https://gersondahora1993-sketch.github.io/nba-lab/**
+
+![QR code do app](assets/qr-code.png)
 
 ---
 
-## Como abrir
+## Instalar no Windows
 
-1. Tenha o **Node.js 18 ou superior** instalado.
-2. Dê **duplo clique em `iniciar.bat`**.
+O instalador cria dois atalhos: um na **Área de Trabalho** e outro na pasta **Inicialização** (abre junto com o Windows).
 
-Ou pelo terminal:
+1. Dê **duplo clique em `instalar_windows.bat`**.
+2. Abra pelo atalho **NBA Lab** na Área de Trabalho.
 
-```bash
-cd nba-dashboard
-npm start
-```
+O atalho abre o app em uma janela própria do Edge, sem barra de endereço, já em tela cheia de trabalho.
 
-Depois acesse **http://localhost:3000**.
+Para **desativar a abertura automática**, dê duplo clique em `remover_autostart.bat`. O atalho da Área de Trabalho continua funcionando.
 
-> Na primeira consulta de cada time/jogador, o app baixa os boxscores e guarda em cache. As próximas cargas são quase instantâneas.
+> Se o Edge não estiver instalado, o app também abre normalmente em qualquer navegador pelo link acima. No Edge/Chrome do PC, use o ícone de instalação na barra de endereço para instalar como aplicativo.
+
+---
+
+## Instalar no Android
+
+1. Abra o link do app no **Chrome** do celular (ou escaneie o QR code acima).
+2. Toque no menu **⋮** e escolha **Instalar app** / **Adicionar à tela inicial**.
+3. Confirme. O ícone do **NBA Lab** aparece na tela inicial e abre em tela cheia, como um app.
+
+Requisitos: Chrome atualizado e conexão com a internet. O app funciona em HTTPS (GitHub Pages) e guarda os dados já consultados para abrir mais rápido.
 
 ---
 
@@ -62,11 +75,11 @@ Combos disponíveis: **PRA**, PTS+REB, PTS+AST, REB+AST, pontos, rebotes, assist
 
 ## Fonte dos dados e cache
 
-- `https://site.api.espn.com` — jogos, boxscores, calendário, escalações e odds.
-- `https://site.web.api.espn.com` — log de partidas dos jogadores.
+- `https://site.web.api.espn.com` — jogos, boxscores, calendário, escalações e log dos jogadores.
 - `https://sports.core.api.espn.com` — dados do atleta e do time.
+- `https://a.espncdn.com` — logos e fotos.
 
-O servidor guarda cache em memória e na pasta `cache/`:
+O app guarda os dados normalizados no **localStorage** do navegador:
 
 | Dado | Validade |
 |---|---|
@@ -75,7 +88,28 @@ O servidor guarda cache em memória e na pasta `cache/`:
 | Log do jogador | 15 minutos |
 | Placar/odds do dia | 90 segundos |
 
-Para forçar uma atualização completa, feche o servidor e apague a pasta `cache/`.
+As respostas brutas da ESPN ficam só na memória da aba. Para forçar atualização, limpe os dados do site no navegador (ou use `localStorage.clear()` no console).
+
+---
+
+## Rodar localmente (opcional)
+
+O dashboard publicado não precisa de servidor. Para desenvolver:
+
+```bash
+cd nba-dashboard
+npm start
+```
+
+Acesse **http://localhost:3000**.
+
+Para gerar a pasta publicada no GitHub Pages:
+
+```bash
+npm run build
+```
+
+O comando copia `public/` para `docs/`. Depois faça commit e push; o Pages atualiza sozinho.
 
 ---
 
@@ -83,18 +117,25 @@ Para forçar uma atualização completa, feche o servidor e apague a pasta `cach
 
 ```
 nba-dashboard/
-├── iniciar.bat
+├── instalar_windows.bat   # cria atalhos no Windows (Área de Trabalho + Inicialização)
+├── remover_autostart.bat  # remove o atalho da pasta Inicialização
+├── iniciar.bat            # abre a versão local (requer Node.js)
 ├── package.json
-├── server.js          # servidor HTTP + normalização dos dados da ESPN
-├── public/
+├── build.js               # copia public/ para docs/
+├── server.js              # servidor local de desenvolvimento
+├── assets/                # ícone .ico e QR code
+├── public/                # código-fonte do app
 │   ├── index.html
 │   ├── styles.css
-│   ├── app.js         # lógica do dashboard e gráficos
+│   ├── app.js             # lógica do dashboard e gráficos
+│   ├── api-client.js      # dados da ESPN direto no navegador
+│   ├── sw.js              # service worker (shell offline)
+│   ├── manifest.webmanifest
+│   ├── icons/
 │   └── vendor/chart.umd.min.js
-└── cache/             # criado automaticamente
+├── docs/                  # build publicado no GitHub Pages
+└── cache/                 # cache do servidor local (não versionado)
 ```
-
-Não há dependências externas: só o Node.js nativo (fetch, http, fs).
 
 ---
 
