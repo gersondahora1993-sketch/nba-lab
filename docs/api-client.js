@@ -229,8 +229,23 @@
     });
   }
 
-  async function getSlate() {
-    const json = await espn(`${ESPN}/scoreboard`, 90, 'scoreboard:current');
+  function localDateKey(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}${m}${d}`;
+  }
+
+  function shiftDate(date, days) {
+    const next = new Date(date);
+    next.setDate(next.getDate() + days);
+    return next;
+  }
+
+  async function fetchScoreboard(dateKey) {
+    // O scoreboard sem "dates" usa o dia do servidor (EUA) e fica um dia atrasado
+    // para quem abre o app de madrugada no Brasil. Passamos a data local sempre.
+    const json = await espn(`${ESPN}/scoreboard?dates=${dateKey}`, 90, `scoreboard:${dateKey}`);
     return (json.events || []).map((event) => {
       const comp = event.competitions?.[0];
       const odds = comp?.odds?.[0];
@@ -265,6 +280,27 @@
         } : null,
         competitors,
       };
+    });
+  }
+
+  async function getSlate() {
+    const now = new Date();
+
+    // Jogos da madrugada anterior que ainda estão rolando (virada do dia no Brasil).
+    const previous = await fetchScoreboard(localDateKey(shiftDate(now, -1))).catch(() => []);
+    const live = previous.filter((game) => game.status.state === 'in' && !game.status.completed);
+
+    // Dia atual (horário local). Se não houver jogos, avança até 3 dias.
+    let slate = [];
+    for (let offset = 0; offset <= 3 && !slate.length; offset += 1) {
+      slate = await fetchScoreboard(localDateKey(shiftDate(now, offset))).catch(() => []);
+    }
+
+    const seen = new Set();
+    return [...live, ...slate].filter((game) => {
+      if (seen.has(game.id)) return false;
+      seen.add(game.id);
+      return true;
     });
   }
 

@@ -1,5 +1,5 @@
 /* GS NBA PRO — service worker (shell offline + atualização automática) */
-const CACHE = 'gs-nba-pro-shell-v2';
+const CACHE = 'gs-nba-pro-shell-v3';
 const ASSETS = [
   './',
   './index.html',

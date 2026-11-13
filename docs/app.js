@@ -81,6 +81,7 @@ const state = {
   compareData: { a: null, b: null },
   slateLoaded: false,
   slateGames: [],
+  slateSignature: '',
   slateInsights: new Map(),
   slateBestBets: [],
   insightsToken: 0,
@@ -448,23 +449,70 @@ function todayLabel() {
   $('#season-label').textContent = state.season || '—';
 }
 
-async function loadSlate() {
+function slateSignature(games) {
+  return games
+    .map((game) => [
+      game.id,
+      game.status.state,
+      game.status.completed ? 1 : 0,
+      game.competitors.map((c) => c.score).join('-'),
+      game.odds?.details || '',
+      game.odds?.total ?? '',
+    ].join(':'))
+    .join('|');
+}
+
+async function loadSlate({ silent = false } = {}) {
   const grid = $('#slate-grid');
-  grid.innerHTML = '<div class="skeleton-card"></div><div class="skeleton-card"></div><div class="skeleton-card"></div>';
+  if (!silent) {
+    grid.innerHTML = '<div class="skeleton-card"></div><div class="skeleton-card"></div><div class="skeleton-card"></div>';
+  }
   try {
     const data = await api('/api/slate');
+    const games = data.games || [];
+    const signature = slateSignature(games);
+    const changed = signature !== state.slateSignature;
+
     state.slateLoaded = true;
-    state.slateGames = data.games || [];
-    renderSlate(state.slateGames);
-    loadSlateInsights(state.slateGames);
+    state.slateGames = games;
+    state.slateSignature = signature;
+    todayLabel();
+
+    if (changed || !silent) {
+      renderSlate(games);
+      loadSlateInsights(games);
+    } else {
+      updateSlateStamp(games);
+    }
   } catch (err) {
-    grid.innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`;
+    if (!silent) grid.innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`;
   }
+}
+
+function startSlateAutoRefresh() {
+  const refresh = () => {
+    if (document.visibilityState !== 'visible') return;
+    if (!$('#view-overview')?.classList.contains('active')) return;
+    loadSlate({ silent: true });
+  };
+  setInterval(refresh, 5 * 60 * 1000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') refresh();
+  });
+}
+
+function updateSlateStamp(games) {
+  const time = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const first = games[0]?.date ? new Date(games[0].date) : null;
+  const day = first
+    ? first.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+    : '';
+  $('#slate-updated').textContent = `Atualizado ${time}${day ? ` · ${day}` : ''}`;
 }
 
 function renderSlate(games) {
   const grid = $('#slate-grid');
-  $('#slate-updated').textContent = `Atualizado ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+  updateSlateStamp(games);
 
   if (!games.length) {
     grid.innerHTML = '<div class="empty" style="grid-column:1/-1">Nenhum jogo na grade de hoje. Volte mais tarde.</div>';
@@ -2100,6 +2148,7 @@ async function init() {
   bindTeamInteractions();
   bindComboInteractions();
   bindOverviewInteractions();
+  startSlateAutoRefresh();
 
   playerPicker = setupPicker($('#player-picker'), (p) => loadPlayer(p.id));
   comboPicker = setupPicker($('#combo-picker'), (p) => loadComboPlayer(p.id));
