@@ -1,5 +1,5 @@
-/* GS NBA PRO — service worker (shell offline + atualização automática) */
-const CACHE = 'gs-nba-pro-shell-v3';
+/* GS Stats PRO — service worker (shell offline + atualização automática) */
+const CACHE = 'gs-stats-pro-shell-v4';
 const ASSETS = [
   './',
   './index.html',
@@ -31,37 +31,20 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  // Dados da ESPN e afins passam direto pela rede.
+  // Dados externos (ESPN, odds) passam direto pela rede.
   if (url.origin !== self.location.origin) return;
   if (req.method !== 'GET') return;
 
-  // Navegação: rede primeiro, cache como fallback offline.
-  if (req.mode === 'navigate') {
-    event.respondWith(
-      fetch(req)
-        .then((res) => {
+  // Sempre rede primeiro para nunca servir código antigo; cache só como fallback offline.
+  event.respondWith(
+    fetch(req)
+      .then((res) => {
+        if (res && res.status === 200) {
           const copy = res.clone();
           caches.open(CACHE).then((cache) => cache.put(req, copy)).catch(() => {});
-          return res;
-        })
-        .catch(() => caches.match(req).then((r) => r || caches.match('./index.html')))
-    );
-    return;
-  }
-
-  // Arquivos estáticos: cache primeiro + revalidação em segundo plano.
-  event.respondWith(
-    caches.match(req).then((cached) => {
-      const network = fetch(req)
-        .then((res) => {
-          if (res && res.status === 200) {
-            const copy = res.clone();
-            caches.open(CACHE).then((cache) => cache.put(req, copy)).catch(() => {});
-          }
-          return res;
-        })
-        .catch(() => cached);
-      return cached || network;
-    })
+        }
+        return res;
+      })
+      .catch(() => caches.match(req).then((cached) => cached || (req.mode === 'navigate' ? caches.match('./index.html') : undefined)))
   );
 });

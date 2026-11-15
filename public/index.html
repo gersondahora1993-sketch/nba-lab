@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GS NBA PRO — Dashboard de Estatísticas e Probabilidades</title>
-  <meta name="description" content="GS NBA PRO: dashboard de estatísticas da NBA com últimos 10 jogos, gráficos, sugestões de props e probabilidades para análise." />
-  <meta name="theme-color" content="#f97316" />
+  <title>GS Stats PRO — Análise de Props e Probabilidades NBA</title>
+  <meta name="description" content="GS Stats PRO: análise de props da NBA com medias por jogo, aproveitamento L5/L10/L20, gráficos e odds da 99play. 100% gratuito." />
+  <meta name="theme-color" content="#0a0a0c" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="GS NBA PRO" />
+  <meta name="apple-mobile-web-app-title" content="GS Stats PRO" />
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏀</text></svg>" />
@@ -19,15 +19,10 @@
   <div class="app">
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-mark">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6">
-            <circle cx="12" cy="12" r="9"></circle>
-            <path d="M3 12h18M12 3v18M5.6 5.6c3.3 2.1 5.4 5.7 5.4 9.4M18.4 5.6c-3.3 2.1-5.4 5.7-5.4 9.4"></path>
-          </svg>
-        </div>
+        <div class="brand-mark"><span>GS</span></div>
         <div class="brand-text">
-          <strong>GS NBA PRO</strong>
-          <span>análise &amp; probabilidades</span>
+          <strong>GS Stats PRO</strong>
+          <span>props &amp; probabilidades</span>
         </div>
       </div>
 
@@ -93,15 +88,15 @@
 
         <section id="overview-radar" class="radar-section" hidden>
           <div class="section-head">
-            <h3>Radar de apostas GS NBA PRO</h3>
-            <span class="hint" id="radar-hint">Probabilidades estimadas pelos últimos 10 jogos</span>
+            <h3>Radar de apostas GS Stats PRO</h3>
+            <span class="hint" id="radar-hint">Props ordenadas pela probabilidade estimada</span>
           </div>
           <div class="grid two">
             <div class="card">
               <div class="card-head">
                 <div>
-                  <h3>Melhores sugestões do dia</h3>
-                  <span class="hint">Linha conservadora + probabilidade estimada</span>
+                  <h3>Melhores props do dia</h3>
+                  <span class="hint">Probabilidade + odd da 99play · gratuito</span>
                 </div>
                 <span class="badge orange">auto</span>
               </div>
@@ -243,6 +238,8 @@
         <div id="player-header" class="entity-head"></div>
         <div id="player-kpis" class="kpi-grid"></div>
 
+        <div id="player-analysis" class="player-analysis"></div>
+
         <div class="grid two">
           <div class="card chart-card">
             <div class="card-head"><div><h3>Pontos, rebotes e assistências</h3><span class="hint">Jogo a jogo</span></div></div>
@@ -360,7 +357,7 @@
       </section>
 
       <footer class="footer">
-        <span>GS NBA PRO · dados via ESPN</span>
+        <span>GS Stats PRO · dados via ESPN</span>
         <span>Probabilidades estimadas pelo histórico. Não há garantia de resultado. Aposte com responsabilidade · +18</span>
       </footer>
     </main>

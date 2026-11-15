@@ -545,6 +545,7 @@
 
   function playerCombo(stats) {
     const { pts, reb, ast, stl, blk, tpm } = stats;
+    const dd = [pts, reb, ast, stl, blk].filter((v) => v >= 10).length;
     return {
       pra: pts + reb + ast,
       pr: pts + reb,
@@ -553,6 +554,8 @@
       p3: pts + tpm,
       stocks: stl + blk,
       pra3: pts + reb + ast + tpm,
+      dd: dd >= 2 ? 1 : 0,
+      td: dd >= 3 ? 1 : 0,
     };
   }
 
@@ -733,22 +736,221 @@
         const base = {
           min: read('minutes'), pts: read('points'), reb: read('totalRebounds'),
           ast: read('assists'), stl: read('steals'), blk: read('blocks'),
-          to: read('turnovers'),
+          to: read('turnovers'), pf: read('fouls'),
           fgm: fg[0], fga: fg[1], tpm: tp[0], tpa: tp[1], ftm: ft[0], fta: ft[1],
         };
+        base.tpm2 = Math.max(0, base.fgm - base.tpm);
+        base.tpa2 = Math.max(0, base.fga - base.tpa);
         base.combos = playerCombo(base);
         return { eventId: String(entry.eventId), stats: base };
       });
 
       const averages = {};
-      for (const key of ['pts', 'reb', 'ast', 'stl', 'blk', 'to', 'tpm']) {
+      for (const key of ['pts', 'reb', 'ast', 'stl', 'blk', 'to', 'tpm', 'tpa', 'tpm2', 'tpa2', 'pf']) {
         averages[key] = round(average(games, (g) => g.stats[key]), 1);
       }
+      for (const key of ['pra', 'pr', 'pa', 'ra', 'stocks', 'dd', 'td']) {
+        averages[key] = round(average(games, (g) => g.stats.combos[key]), 1);
+      }
       averages.min = round(average(games, (g) => g.stats.min), 1);
-      averages.pra = round(average(games, (g) => g.stats.combos.pra), 1);
       averages.gp = games.length;
 
       return { playerId: String(playerId), season: SEASON_LABEL, games, averages };
+    });
+  }
+
+  /* ------------------------------------------- odds ao vivo (99play/Altenar) */
+  const BOOK = {
+    base: 'https://sb2frontend-altenar2.biahosted.com/api/widget',
+    params: 'culture=pt-BR&timezoneOffset=180&integration=24games1&deviceType=1&numFormat=pt-BR&countryCode=BR',
+    relay: 'https://r.jina.ai/',
+  };
+
+  // A Altenar bloqueia chamadas diretas de outras origens (Cloudflare).
+  // O relay r.jina.ai devolve o JSON cru com CORS liberado para a origem do app.
+  async function bookJson(pathAndQuery, ttl = 240, key = pathAndQuery) {
+    return memCached(`book:http:${key}`, ttl * 1000, async () => {
+      const target = `${BOOK.base}/${pathAndQuery}`;
+      const attempts = [`${BOOK.relay}${target}`, target];
+      let lastError;
+      for (const url of attempts) {
+        try {
+          const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const text = await res.text();
+          const start = text.search(/[[{]/);
+          if (start < 0) throw new Error('Resposta inválida');
+          return JSON.parse(text.slice(start));
+        } catch (err) {
+          lastError = err;
+        }
+      }
+      throw lastError;
+    });
+  }
+
+  // Somente mercados "Mais/Menos" com linha única (as famílias 186xx são
+  // escadas alternativas de linha, sem o "menos" — ignoradas de propósito).
+  const BOOK_MARKETS = {
+    768: 'pts',
+    772: 'reb',
+    770: 'ast',
+    773: 'stl',
+    771: 'blk',
+    774: 'tpm',
+    25050: 'to',
+    2312: 'pf',
+    2313: 'tpa',
+    2314: 'tpa2',
+    2322: 'tpm2',
+    2319: 'q1pts',
+    2320: 'q1reb',
+    2321: 'q1ast',
+    30070: 'pr',
+    30071: 'pa',
+    30072: 'pra',
+    30073: 'ra',
+    30078: 'stocks',
+    2244: 'dd',
+    2220: 'td',
+  };
+
+  function parseBookEvent(json) {
+    const teams = (json.competitors || []).map((c) => ({
+      id: String(c.id),
+      abbr: c.abbreviation || '',
+      name: c.name || '',
+    }));
+    const oddsById = new Map((json.odds || []).map((o) => [o.id, o]));
+    const childById = new Map((json.childMarkets || []).map((c) => [c.id, c]));
+    const props = {};
+
+    for (const market of json.markets || []) {
+      const key = BOOK_MARKETS[market.typeId];
+      if (!key || !Array.isArray(market.childMarketIds) || !market.childMarketIds.length) continue;
+
+      for (const childId of market.childMarketIds) {
+        const child = childById.get(childId);
+        if (!child) continue;
+        const line = Number(String(child.sv || '').split('|')[0]);
+        const player = normText(child.childName || '');
+        if (!player || !Number.isFinite(line)) continue;
+
+        const groups = child.desktopOddIds || child.mobileOddIds || [];
+        const overId = groups?.[0]?.[0];
+        const underId = groups?.[1]?.[0] ?? groups?.[0]?.[1];
+        const over = oddsById.get(overId)?.price ?? null;
+        const under = oddsById.get(underId)?.price ?? null;
+
+        props[player] = props[player] || {};
+        if (!props[player][key]) props[player][key] = { line, over, under };
+      }
+    }
+
+    // Duplo-duplo e triplo-duplo são mercados "planos" (odd com nome do jogador).
+    for (const market of json.markets || []) {
+      const key = market.typeId === 2244 ? 'dd' : market.typeId === 2220 ? 'td' : null;
+      if (!key) continue;
+      const groups = market.desktopOddIds || market.mobileOddIds || [];
+      for (const oddId of groups?.[0] || []) {
+        const odd = oddsById.get(oddId);
+        if (!odd || !odd.name) continue;
+        const player = normText(String(odd.name).replace(/\([^)]*\)/g, ''));
+        if (!player) continue;
+        props[player] = props[player] || {};
+        if (!props[player][key]) props[player][key] = { line: 0.5, over: odd.price ?? null, under: null };
+      }
+    }
+
+    return {
+      id: String(json.id || ''),
+      name: json.name || '',
+      startDate: json.startDate || '',
+      teams,
+      props,
+    };
+  }
+
+  async function getBookSlate() {
+    return memCached('book:slate', 4 * 60 * 1000, async () => {
+      const json = await bookJson(`GetEvents?sportId=67&${BOOK.params}`, 300, 'slate');
+      const comps = new Map((json.competitors || []).map((c) => [c.id, c]));
+      return (json.events || [])
+        .filter((event) => event.sportId === 67)
+        .map((event) => ({
+          id: String(event.id),
+          name: event.name || '',
+          champId: event.champId,
+          startDate: event.startDate || '',
+          teams: (event.competitorIds || []).map((id) => {
+            const c = comps.get(id) || {};
+            return { id: String(id), abbr: c.abbreviation || '', name: c.name || '' };
+          }),
+        }));
+    });
+  }
+
+  async function getBookEvent(eventId) {
+    return memCached(`book:event:${eventId}`, 4 * 60 * 1000, async () => {
+      const json = await bookJson(`GetEventDetails?${BOOK.params}&eventId=${eventId}`, 300, `event:${eventId}`);
+      return parseBookEvent(json);
+    });
+  }
+
+  /* ------------------------------------------- 1º quarto (play-by-play) */
+  async function getPlayerQuarters(playerId, last = 20) {
+    return cached(`quarters:${playerId}:${last}:${SEASON}`, 12 * 3600 * 1000, async () => {
+      const log = await espn(
+        `${ESPN_WEB}/athletes/${playerId}/gamelog?season=${SEASON}`,
+        900,
+        `gamelog:${playerId}:${SEASON}`
+      );
+      const seasonType =
+        (log?.seasonTypes || []).find((s) => /regular season/i.test(s.displayName || '')) ||
+        (log?.seasonTypes || [])[0];
+      const eventIds = (seasonType?.categories || [])
+        .flatMap((c) => c.events || [])
+        .slice(0, last)
+        .map((e) => String(e.eventId));
+
+      let name = '';
+      try {
+        const athlete = await espn(
+          `${ESPN_CORE}/seasons/${SEASON}/athletes/${playerId}`,
+          12 * 3600,
+          `athlete:${playerId}:${SEASON}`
+        );
+        name = normText(athlete?.fullName || '');
+      } catch { /* opcional */ }
+
+      const summaries = await mapLimit(eventIds, 4, async (eventId) => {
+        try {
+          return await espn(`${ESPN}/summary?event=${eventId}`, 6 * 3600, `summary:${eventId}`);
+        } catch {
+          return null;
+        }
+      });
+
+      const out = {};
+      eventIds.forEach((eventId, index) => {
+        const summary = summaries[index];
+        let points = 0;
+        let assists = 0;
+        for (const play of summary?.plays || []) {
+          if (Number(play.period?.number) !== 1) continue;
+          if (play.scoringPlay) {
+            const scorer = play.participants?.[0]?.athlete?.id;
+            if (scorer && String(scorer) === String(playerId)) points += Number(play.scoreValue) || 0;
+          }
+          if (name) {
+            const match = String(play.text || '').match(/\(([^()]+)\s+assists?\)/i);
+            if (match && normText(match[1]) === name) assists += 1;
+          }
+        }
+        out[eventId] = { q1pts: points, q1ast: assists };
+      });
+
+      return { playerId: String(playerId), games: out };
     });
   }
 
@@ -791,6 +993,21 @@
       return getPlayerSeries(seriesMatch[1], last);
     }
 
+    const quartersMatch = pathname.match(/^\/api\/player-quarters\/(\d+)$/);
+    if (quartersMatch) {
+      const last = Math.min(Math.max(Number(url.searchParams.get('last') || 20), 1), 40);
+      return getPlayerQuarters(quartersMatch[1], last);
+    }
+
+    if (pathname === '/api/book/slate') {
+      return { events: await getBookSlate() };
+    }
+
+    const bookMatch = pathname.match(/^\/api\/book\/event\/(\d+)$/);
+    if (bookMatch) {
+      return getBookEvent(bookMatch[1]);
+    }
+
     const teamMatch = pathname.match(/^\/api\/team\/(\d+)$/);
     if (teamMatch) {
       const last = Math.min(Math.max(Number(url.searchParams.get('last') || 10), 1), 20);
@@ -799,7 +1016,7 @@
 
     const playerMatch = pathname.match(/^\/api\/player\/(\d+)$/);
     if (playerMatch) {
-      const last = Math.min(Math.max(Number(url.searchParams.get('last') || 10), 1), 20);
+      const last = Math.min(Math.max(Number(url.searchParams.get('last') || 10), 1), 82);
       return getPlayerDashboard(playerMatch[1], last);
     }
 

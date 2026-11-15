@@ -1,8 +1,8 @@
 {
-  "name": "gs-nba-pro",
-  "version": "1.1.0",
+  "name": "gs-stats-pro",
+  "version": "2.0.0",
   "private": true,
-  "description": "GS NBA PRO: dashboard de estatisticas da NBA com ultimos 10 jogos, graficos, sugestoes de props e probabilidades.",
+  "description": "GS Stats PRO: análise de props da NBA com medias por jogo, aproveitamento L5/L10/L20, gráficos e odds da 99play. Gratuito.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

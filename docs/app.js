@@ -6,17 +6,17 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const C = {
-  orange: '#f97316',
-  orangeFill: 'rgba(249, 115, 22, 0.82)',
-  teal: '#2dd4bf',
-  tealFill: 'rgba(45, 212, 191, 0.78)',
-  blue: '#60a5fa',
-  blueFill: 'rgba(96, 165, 250, 0.75)',
-  violet: '#a78bfa',
+  orange: '#ff2d46',
+  orangeFill: 'rgba(255, 45, 70, 0.82)',
+  teal: '#f87171',
+  tealFill: 'rgba(248, 113, 113, 0.78)',
+  blue: '#fb7185',
+  blueFill: 'rgba(251, 113, 133, 0.75)',
+  violet: '#e879f9',
   green: '#22c55e',
-  red: '#f05252',
+  red: '#ef4444',
   yellow: '#fbbf24',
-  slate: 'rgba(148, 163, 184, 0.45)',
+  slate: 'rgba(161, 161, 170, 0.45)',
 };
 
 const TEAM_STAT_META = {
@@ -43,11 +43,11 @@ const COMBO_DEFS = {
 };
 
 const PROP_MARKETS = [
-  { key: 'pts', label: 'Pontos', short: 'PTS', minAvg: 10, minLine: 4.5, series: (s) => s.pts },
-  { key: 'pra', label: 'PRA', short: 'PRA', minAvg: 16, minLine: 9.5, series: (s) => s.combos.pra },
+  { key: 'pts', label: 'Pontos', short: 'PTS', minAvg: 10, minLine: 9.5, series: (s) => s.pts },
+  { key: 'pra', label: 'PRA', short: 'PRA', minAvg: 16, minLine: 14.5, series: (s) => s.combos.pra },
   { key: 'reb', label: 'Rebotes', short: 'REB', minAvg: 4, minLine: 2.5, series: (s) => s.reb },
-  { key: 'ast', label: 'Assistências', short: 'AST', minAvg: 3, minLine: 1.5, series: (s) => s.ast },
-  { key: 'tpm', label: 'Cestas de 3', short: '3PM', minAvg: 1.5, minLine: 0.5, series: (s) => s.tpm },
+  { key: 'ast', label: 'Assistências', short: 'AST', minAvg: 3, minLine: 2.5, series: (s) => s.ast },
+  { key: 'tpm', label: 'Cestas de 3', short: '3PM', minAvg: 1.5, minLine: 1.5, series: (s) => s.tpm },
   { key: 'stocks', label: 'Roubos + Tocos', short: 'STL+BLK', minAvg: 1.5, minLine: 1.5, series: (s) => s.stl + s.blk },
 ];
 
@@ -584,7 +584,7 @@ function betBannerHtml(insight) {
       <span class="bet-icon">${betIconSvg()}</span>
       <img class="bet-face" src="${escapeHtml(s.player.headshot)}" alt="" onerror="this.style.opacity='.15'" />
       <span class="bet-copy">
-        <span class="bet-eyebrow">Sugestão GS NBA PRO</span>
+        <span class="bet-eyebrow">Sugestão GS Stats PRO</span>
         <strong>${escapeHtml(s.player.name)} <span class="bet-team">${escapeHtml(s.player.teamAbbr || '')}</span></strong>
         <span class="bet-market">Over <b>${fmt(s.line, 1)} ${escapeHtml(s.market.short)}</b> · <b class="bet-prob">${s.probability}%</b> de probabilidade</span>
       </span>
@@ -634,7 +634,7 @@ function updateGameInsight(gameId) {
   if (flag) {
     const best = insight?.suggestion;
     flag.innerHTML = best
-      ? `<span class="bet-flag-on" title="Sugestão GS NBA PRO: ${escapeHtml(best.player.name)} over ${fmt(best.line, 1)} ${escapeHtml(best.market.short)} (${best.probability}%)">${betIconSvg()}</span>`
+      ? `<span class="bet-flag-on" title="Sugestão GS Stats PRO: ${escapeHtml(best.player.name)} over ${fmt(best.line, 1)} ${escapeHtml(best.market.short)} (${best.probability}%)">${betIconSvg()}</span>`
       : '';
   }
 }
@@ -709,6 +709,8 @@ function buildPropSuggestions(player, series) {
       score,
       cv,
       n: values.length,
+      hits: over,
+      recent: values.slice(0, 10),
       mean,
       player: {
         id: player.id,
@@ -793,12 +795,63 @@ async function loadSlateInsights(games) {
   });
 
   if (token !== state.insightsToken) return;
+  await attachOdds(state.slateBestBets);
+  if (token !== state.insightsToken) return;
   renderOverviewRadar();
   renderOverviewStars();
 }
 
+async function attachOdds(bets) {
+  if (!bets?.length) return;
+  await ensureBookSlate();
+  const byEvent = new Map();
+  for (const bet of bets) {
+    const event = findBookEvent({ abbr: bet.player.teamAbbr, name: bet.player.teamName });
+    if (!event) continue;
+    bet.eventId = event.id;
+    if (!byEvent.has(event.id)) byEvent.set(event.id, []);
+    byEvent.get(event.id).push(bet);
+  }
+  await mapLimit([...byEvent.entries()], 3, async ([eventId, list]) => {
+    try {
+      const details = await api(`/api/book/event/${eventId}`);
+      for (const bet of list) {
+        const target = nameKey(bet.player.name);
+        const entry = Object.entries(details.props || {}).find(([key]) => nameKey(key) === target);
+        const book = entry?.[1]?.[bet.market.key] || null;
+        if (!book) continue;
+        bet.bookLine = book.line;
+        bet.odd = book.over;
+        bet.underOdd = book.under;
+        bet.eventLabel = (details.teams || []).map((t) => t.abbr).join(' x ');
+        bet.eventTime = details.startDate || '';
+        if (book.line != null) recomputeAtLine(bet, book.line);
+      }
+    } catch { /* odd opcional */ }
+  });
+}
+
+// Recalcula aproveitamento/probabilidade na linha real da casa de apostas.
+function recomputeAtLine(bet, line) {
+  const values = bet.recent || [];
+  if (!values.length) return;
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  const sd = Math.max(stdDev(values), 0.55);
+  const hits = values.filter((v) => v > line).length;
+  const empirical = hits / values.length;
+  const model = 1 - normalCdf((line - mean) / sd);
+  const last5 = values.slice(0, 5);
+  const recentRate = last5.length ? last5.filter((v) => v > line).length / last5.length : empirical;
+  const p = 0.55 * empirical + 0.30 * model + 0.15 * recentRate;
+  bet.line = line;
+  bet.mean = mean;
+  bet.hits = hits;
+  bet.n = values.length;
+  bet.probability = Math.round(Math.min(0.90, Math.max(0.35, p)) * 100);
+}
+
 function shortPlayerName(name) {
-  const parts = String(name || '').trim().split(/\s+/);
+  const parts = String(name || '').trim().split(/\s+/).filter((p) => !/^(jr|sr|ii|iii|iv)\.?$/i.test(p));
   return parts.length > 1 ? parts[parts.length - 1] : parts[0] || '—';
 }
 
@@ -808,13 +861,13 @@ function renderOverviewRadar() {
 
   const seenPlayers = new Set();
   const bets = [...state.slateBestBets]
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => b.probability - a.probability || b.score - a.score)
     .filter((s) => {
       if (seenPlayers.has(s.player.id)) return false;
       seenPlayers.add(s.player.id);
       return true;
     })
-    .slice(0, 8);
+    .slice(0, 10);
   if (!bets.length) {
     section.hidden = true;
     destroyCharts(['chart-overview-probs']);
@@ -822,10 +875,15 @@ function renderOverviewRadar() {
   }
 
   section.hidden = false;
-  const top = bets.slice(0, 6);
-  $('#radar-hint').textContent = `${top.length} sugestões · baseadas nos últimos 10 jogos`;
+  const top = bets.slice(0, 8);
+  $('#radar-hint').textContent = `${top.length} props ordenadas pela maior probabilidade · odds 99play`;
 
-  $('#radar-list').innerHTML = top.map((s, index) => `
+  $('#radar-list').innerHTML = top.map((s, index) => {
+    const recent = [...(s.recent || [])].reverse();
+    const max = Math.max(1, ...recent);
+    const spark = recent.map((v) => `<i class="${v > s.line ? 'on' : 'off'}" style="height:${Math.max(12, Math.round((v / max) * 100))}%"></i>`).join('');
+    const oddOn = !!s.odd;
+    return `
     <button type="button" class="radar-item" data-player-id="${escapeHtml(s.player.id)}" data-player-name="${escapeHtml(s.player.name)}">
       <span class="radar-rank">${index + 1}</span>
       <img src="${escapeHtml(s.player.headshot)}" alt="" onerror="this.style.opacity='.15'" />
@@ -835,11 +893,16 @@ function renderOverviewRadar() {
           <span class="badge blue">${escapeHtml(s.player.teamAbbr || 'NBA')}</span>
           <span class="radar-prob">${s.probability}%</span>
         </span>
-        <span class="radar-bet">Over ${fmt(s.line, 1)} ${escapeHtml(s.market.short)} · ${escapeHtml(s.market.label)}</span>
-        <span class="radar-stats">${fmt(s.player.pts, 1)} PTS · ${fmt(s.player.reb, 1)} REB · ${fmt(s.player.ast, 1)} AST · ${fmt(s.player.tpm, 1)} 3PM</span>
+        <span class="radar-bet">Over ${fmt(s.line, 1)} ${escapeHtml(s.market.short)} · ${escapeHtml(s.market.label)}${s.eventLabel ? ` <span class="radar-match">${escapeHtml(s.eventLabel)}</span>` : ''}</span>
+        <span class="radar-meta">
+          <span class="spark">${spark}</span>
+          <span class="radar-hit">${s.hits}/${s.n} acima</span>
+          <span class="radar-odd ${oddOn ? 'on' : 'off'}">${s.odd ? fmt(s.odd, 2) : '—'}</span>
+        </span>
         <span class="radar-bar"><i style="width:${s.probability}%"></i></span>
       </span>
-    </button>`).join('');
+    </button>`;
+  }).join('');
 
   renderOverviewProbChart(top);
 }
@@ -853,8 +916,8 @@ function renderOverviewProbChart(bets) {
         data: bets.map((s) => s.probability),
         backgroundColor: bets.map((s) => (
           s.probability >= 70 ? 'rgba(34, 197, 94, 0.78)'
-            : s.probability >= 60 ? 'rgba(249, 115, 22, 0.82)'
-              : 'rgba(148, 163, 184, 0.42)'
+            : s.probability >= 55 ? 'rgba(251, 191, 36, 0.8)'
+              : 'rgba(161, 161, 170, 0.42)'
         )),
         borderRadius: 5,
         maxBarThickness: 22,
@@ -1359,7 +1422,7 @@ async function loadPlayer(id) {
   $('#player-header').innerHTML = '<div class="loading"><span class="spinner"></span>Carregando jogador…</div>';
 
   try {
-    const data = await api(`/api/player/${id}?last=${state.playerLast}`);
+    const data = await api(`/api/player/${id}?last=82`);
     if (token !== playerToken) return;
     state.playerData = data;
     renderPlayer(data);
@@ -1390,6 +1453,7 @@ function playerHeader(player, seasonLabel, gp) {
 
 function renderPlayer(data) {
   const { player, games, averages: avg, season } = data;
+  const recent = games.slice(0, state.playerLast);
 
   $('#player-header').innerHTML = playerHeader(player, season, games.length);
 
@@ -1416,11 +1480,18 @@ function renderPlayer(data) {
       <div class="kpi-sub">${k.sub}</div>
     </div>`).join('');
 
-  renderPlayerScoringChart(games);
-  renderPlayerPraChart(games, avg);
-  renderPlayerShotsChart(games);
-  renderPlayerEfficiencyChart(games);
-  renderPlayerTable(games, player);
+  renderPlayerScoringChart(recent);
+  renderPlayerPraChart(recent, avg);
+  renderPlayerShotsChart(recent);
+  renderPlayerEfficiencyChart(recent);
+  renderPlayerTable(recent, player);
+
+  renderPlayerAnalysis(data);
+  ensureAnalysisData(data).then((changed) => {
+    if (changed && state.playerData && String(state.playerData.player.id) === String(player.id)) {
+      renderPlayerAnalysis(state.playerData);
+    }
+  });
 }
 
 function renderPlayerScoringChart(games) {
@@ -2185,7 +2256,389 @@ async function init() {
   }
 }
 
+/* ============================================= ANÁLISE DE MERCADOS (props) */
+
+const MARKET_LIST = [
+  { key: 'pts', label: 'Pontos' },
+  { key: 'reb', label: 'Rebotes' },
+  { key: 'ast', label: 'Assistências' },
+  { key: 'q1pts', label: 'Pontos 1ºQ', quarter: true },
+  { key: 'q1reb', label: 'Rebotes 1ºQ', quarter: true, unavailable: true },
+  { key: 'pra', label: 'PRA' },
+  { key: 'pr', label: 'PTS + REB' },
+  { key: 'pa', label: 'PTS + AST' },
+  { key: 'ra', label: 'REB + AST' },
+  { key: 'tpm', label: 'Cestas de 3' },
+  { key: 'tpa', label: 'Tentativas de 3' },
+  { key: 'tpm2', label: 'Cestas de 2' },
+  { key: 'tpa2', label: 'Tentativas de 2' },
+  { key: 'dd', label: 'Duplo-duplo', binary: true, integers: true },
+  { key: 'td', label: 'Triplo-duplo', binary: true, integers: true },
+  { key: 'stl', label: 'Roubos' },
+  { key: 'blk', label: 'Tocos' },
+  { key: 'stocks', label: 'Roubos + Tocos' },
+  { key: 'to', label: 'Turnovers' },
+  { key: 'pf', label: 'Faltas' },
+];
+
+const analysisState = {
+  market: 'pts',
+  line: null,
+  lines: new Map(),
+  book: null,
+  quarters: null,
+};
+
+function looseKey(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z]/g, '');
+}
+
+// Ignora sufixos (Jr., II, III…) para casar nomes da ESPN com os da casa.
+function nameKey(value) {
+  return looseKey(value).replace(/(jr|sr|ii|iii|iv|v)$/,'');
+}
+
+const TEAM_ALIAS = { GS: 'GSW', GSW: 'GSW', NO: 'NOP', NOP: 'NOP', NY: 'NYK', NYK: 'NYK', SA: 'SAS', SAS: 'SAS', WSH: 'WAS', WAS: 'WAS', UTAH: 'UTA', UTA: 'UTA', PHO: 'PHX', PHX: 'PHX', BRK: 'BKN', BKN: 'BKN', CHA: 'CHA', CHO: 'CHA' };
+
+function teamAlias(abbr) {
+  const key = String(abbr || '').toUpperCase();
+  return TEAM_ALIAS[key] || key;
+}
+
+async function ensureBookSlate() {
+  if (state.bookEvents) return state.bookEvents;
+  if (!state.bookSlatePromise) {
+    state.bookSlatePromise = api('/api/book/slate')
+      .then((res) => {
+        state.bookEvents = (res.events || []).filter((e) => !e.champId || e.champId === 2980);
+        return state.bookEvents;
+      })
+      .catch(() => {
+        state.bookEvents = [];
+        return [];
+      });
+  }
+  return state.bookSlatePromise;
+}
+
+function findBookEvent(team) {
+  if (!team || !state.bookEvents?.length) return null;
+  const abbr = teamAlias(team.abbr);
+  const name = looseKey(team.name);
+  return state.bookEvents.find((event) => event.teams.some((t) => {
+    if (teamAlias(t.abbr) === abbr) return true;
+    return name && looseKey(t.name) === name;
+  })) || null;
+}
+
+async function loadBookPropsFor(player) {
+  await ensureBookSlate();
+  const event = findBookEvent(player.team);
+  if (!event) return { event: null, props: null };
+  try {
+    const details = await api(`/api/book/event/${event.id}`);
+    const target = nameKey(player.name);
+    const entry = Object.entries(details.props || {}).find(([key]) => nameKey(key) === target);
+    return { event: { ...event, startDate: details.startDate || event.startDate }, props: entry ? entry[1] : null };
+  } catch {
+    return { event, props: null };
+  }
+}
+
+async function ensureAnalysisData(data) {
+  const player = data.player;
+  const market = MARKET_LIST.find((m) => m.key === analysisState.market) || MARKET_LIST[0];
+  const playerKey = String(player.id);
+  const tasks = [];
+
+  if (!analysisState.book || analysisState.book.playerId !== playerKey) {
+    tasks.push(
+      loadBookPropsFor(player).then((res) => {
+        analysisState.book = { playerId: playerKey, ...res };
+      }).catch(() => {
+        analysisState.book = { playerId: playerKey, event: null, props: null };
+      })
+    );
+  }
+
+  if (market.quarter && (!analysisState.quarters || analysisState.quarters.playerId !== playerKey)) {
+    tasks.push(
+      api(`/api/player-quarters/${player.id}?last=25`).then((res) => {
+        analysisState.quarters = { playerId: playerKey, games: res.games || {} };
+      }).catch(() => {
+        analysisState.quarters = { playerId: playerKey, games: {} };
+      })
+    );
+  }
+
+  if (!tasks.length) return false;
+  await Promise.all(tasks);
+  return true;
+}
+
+function marketValue(key, game) {
+  const s = game.stats || {};
+  const combos = s.combos || {};
+  switch (key) {
+    case 'pts': return s.pts;
+    case 'reb': return s.reb;
+    case 'ast': return s.ast;
+    case 'stl': return s.stl;
+    case 'blk': return s.blk;
+    case 'to': return s.to;
+    case 'pf': return s.pf;
+    case 'tpm': return s.tpm;
+    case 'tpa': return s.tpa;
+    case 'tpm2': return s.tpm2;
+    case 'tpa2': return s.tpa2;
+    case 'pra': return combos.pra;
+    case 'pr': return combos.pr;
+    case 'pa': return combos.pa;
+    case 'ra': return combos.ra;
+    case 'stocks': return combos.stocks;
+    case 'dd': return combos.dd;
+    case 'td': return combos.td;
+    default: return null;
+  }
+}
+
+function quarterValue(key, eventId) {
+  const entry = analysisState.quarters?.games?.[String(eventId)];
+  if (!entry) return null;
+  if (key === 'q1pts') return entry.q1pts;
+  if (key === 'q1ast') return entry.q1ast;
+  if (key === 'q1reb') return null;
+  return null;
+}
+
+function marketSeries(market, games) {
+  const out = [];
+  for (const game of games) {
+    let value = null;
+    if (market.quarter) value = quarterValue(market.key, game.eventId);
+    else value = marketValue(market.key, game);
+    if (Number.isFinite(value)) out.push({ date: game.date, opp: game.opp, value, eventId: game.eventId });
+  }
+  return out;
+}
+
+function defaultLine(values, market) {
+  if (market.binary) return 0.5;
+  const clean = values.filter(Number.isFinite);
+  if (!clean.length) return 0.5;
+  const avg = clean.reduce((a, b) => a + b, 0) / clean.length;
+  return Math.floor(avg) + 0.5;
+}
+
+function windowHits(values, line, size) {
+  const slice = size ? values.slice(-size) : values;
+  if (!slice.length) return null;
+  const hits = slice.filter((v) => v > line).length;
+  return { hits, total: slice.length, pct: (hits / slice.length) * 100 };
+}
+
+function hitTile(label, stats, accent) {
+  if (!stats) return `<div class="hit-tile empty"><span>${label}</span><strong>—</strong><small>sem dados</small></div>`;
+  const tone = stats.pct >= 65 ? 'good' : stats.pct < 40 ? 'bad' : 'mid';
+  return `<div class="hit-tile ${tone}" style="--accent:${accent}">
+    <span>${label}</span>
+    <strong>${Math.round(stats.pct)}%</strong>
+    <small>${stats.hits}/${stats.total}</small>
+  </div>`;
+}
+
+function gameTimeLabel(iso) {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function renderPlayerAnalysis(data) {
+  const host = $('#player-analysis');
+  if (!host) return;
+  const { player, games } = data;
+  const market = MARKET_LIST.find((m) => m.key === analysisState.market) || MARKET_LIST[0];
+  const ordered = [...games].reverse();
+  const book = analysisState.book?.playerId === String(player.id) ? analysisState.book : null;
+  const bookMarket = book?.props?.[market.key] || null;
+
+  const perPlayer = analysisState.lines;
+  const lineKey = `${player.id}:${market.key}`;
+  const series = marketSeries(market, ordered);
+  const values = series.map((s) => s.value);
+  const stored = perPlayer.get(lineKey);
+  const line = stored != null ? stored : (bookMarket?.line ?? defaultLine(values, market));
+
+  const avg = values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
+  const l5 = windowHits(values, line, 5);
+  const l10 = windowHits(values, line, 10);
+  const l20 = windowHits(values, line, 20);
+  const season = windowHits(values, line, 0);
+
+  const bookLine = bookMarket?.line ?? null;
+  const overOdd = bookMarket?.over ?? null;
+  const underOdd = bookMarket?.under ?? null;
+  const oddLine = bookLine != null && Math.abs(bookLine - line) < 0.001;
+
+  const matchup = book?.event
+    ? `${book.event.teams.map((t) => t.abbr).join(' x ')} · ${gameTimeLabel(book.event.startDate)}`
+    : '';
+
+  const tabs = MARKET_LIST.map((m) => `
+    <button type="button" class="market-tab ${m.key === market.key ? 'active' : ''}" data-market="${m.key}">${m.label}</button>
+  `).join('');
+
+  const unavailable = market.unavailable || (!values.length && !market.quarter);
+  const quarterPending = market.quarter && !analysisState.quarters;
+  const step = market.binary ? 1 : 0.5;
+
+  host.innerHTML = `
+    <div class="card market-card">
+      <div class="market-head">
+        <div>
+          <span class="eyebrow">Análise de mercado</span>
+          <h3>${escapeHtml(market.label)} <span class="market-player">· ${escapeHtml(player.name)}</span></h3>
+          <span class="hint">${matchup ? escapeHtml(matchup) : 'Selecione o jogador do jogo do dia para ver a odd da 99play'}</span>
+        </div>
+        <div class="odd-box ${oddLine && overOdd ? 'on' : 'off'}">
+          <span>Odd 99play</span>
+          <strong>${oddLine && overOdd ? fmt(overOdd, 2) : '—'}</strong>
+          <small>${oddLine && underOdd ? `menos ${fmt(underOdd, 2)}` : oddLine ? 'linha da casa' : 'linha manual'}</small>
+        </div>
+      </div>
+
+      <div class="market-tabs">${tabs}</div>
+
+      <div class="line-row">
+        <span class="line-label">Linha</span>
+        <div class="stepper">
+          <button type="button" class="step" data-line-step="-${step}" data-current="${line}">−</button>
+          <strong>${fmt(line, 1)}</strong>
+          <button type="button" class="step" data-line-step="${step}" data-current="${line}">+</button>
+        </div>
+        ${bookLine != null ? `<button type="button" class="line-reset" data-line-reset>linha da casa ${fmt(bookLine, 1)}</button>` : ''}
+        <span class="line-avg">média ${avg != null ? fmt(avg, 1) : '—'}</span>
+      </div>
+
+      ${unavailable ? `
+        <div class="market-empty">
+          <strong>Mercado sem dados automáticos.</strong>
+          <span>${market.key === 'q1reb'
+            ? 'A ESPN não disponibiliza rebotes por quarto. Use a linha e o histórico completo como referência.'
+            : 'Nenhum jogo com esse dado na temporada atual.'}</span>
+        </div>` : quarterPending ? `
+        <div class="market-empty"><span class="spinner"></span><span>Carregando dados do 1º quarto…</span></div>` : `
+        <div class="hit-grid">
+          ${hitTile('L5', l5)}
+          ${hitTile('L10', l10)}
+          ${hitTile('L20', l20)}
+          ${hitTile('Temporada', season)}
+        </div>
+        <div class="chart-box market-chart"><canvas id="chart-player-market"></canvas></div>
+        <div class="market-legend">
+          <span><i class="dot-green"></i>acima de ${fmt(line, 1)}</span>
+          <span><i class="dot-red"></i>abaixo de ${fmt(line, 1)}</span>
+          <span>${series.length} jogos · ${values.filter((v) => v > line).length} acima da linha</span>
+        </div>
+      `}
+      <div class="market-foot">
+        <a class="book-link" href="https://99play.io/sports#/sport/67" target="_blank" rel="noopener">Conferir odds na 99play ↗</a>
+        <span class="hint">Análise gratuita · sem assinatura</span>
+      </div>
+    </div>`;
+
+  if (!unavailable && !quarterPending) {
+    drawMarketChart(market, series, line);
+  } else {
+    destroyCharts(['chart-player-market']);
+  }
+}
+
+function drawMarketChart(market, series, line) {
+  const shown = series.slice(-20);
+  const values = shown.map((s) => s.value);
+  const colors = values.map((v) => (v > line ? 'rgba(34,197,94,.85)' : 'rgba(239,68,68,.82)'));
+  const label = market.binary ? `${fmt(line, 1)} (sim/não)` : `linha ${fmt(line, 1)}`;
+
+  makeChart('chart-player-market', {
+    type: 'bar',
+    data: {
+      labels: shown.map((s) => shortDate(s.date)),
+      datasets: [{
+        label: market.label,
+        data: values,
+        backgroundColor: colors,
+        borderColor: colors,
+        borderWidth: 1,
+        borderRadius: 4,
+        maxBarThickness: 34,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            afterLabel: (ctx) => {
+              const item = shown[ctx.dataIndex];
+              return item?.opp?.abbr ? `vs ${item.opp.abbr}` : '';
+            },
+          },
+        },
+      },
+      scales: {
+        x: xAxis(),
+        y: yAxis({ beginAtZero: true, ticks: { color: '#8b8b96', precision: market.integers ? 0 : 1 } }),
+      },
+    },
+    plugins: [hLinePlugin(line, label, '#f8fafc')],
+  });
+}
+
+let analysisBound = false;
+function bindAnalysis() {
+  if (analysisBound) return;
+  analysisBound = true;
+  document.addEventListener('click', (event) => {
+    const tab = event.target.closest('#player-analysis [data-market]');
+    if (tab) {
+      analysisState.market = tab.dataset.market;
+      if (!state.playerData) return;
+      renderPlayerAnalysis(state.playerData);
+      ensureAnalysisData(state.playerData).then((changed) => {
+        if (changed && state.playerData) renderPlayerAnalysis(state.playerData);
+      });
+      return;
+    }
+
+    const stepBtn = event.target.closest('#player-analysis [data-line-step]');
+    if (stepBtn && state.playerData) {
+      const market = MARKET_LIST.find((m) => m.key === analysisState.market) || MARKET_LIST[0];
+      const key = `${state.playerData.player.id}:${market.key}`;
+      const current = Number(analysisState.lines.get(key) ?? stepBtn.dataset.current ?? 0);
+      const next = Math.max(0, Math.round((current + Number(stepBtn.dataset.lineStep)) * 10) / 10);
+      analysisState.lines.set(key, next);
+      renderPlayerAnalysis(state.playerData);
+      return;
+    }
+
+    if (event.target.closest('#player-analysis [data-line-reset]') && state.playerData) {
+      const market = MARKET_LIST.find((m) => m.key === analysisState.market) || MARKET_LIST[0];
+      analysisState.lines.delete(`${state.playerData.player.id}:${market.key}`);
+      renderPlayerAnalysis(state.playerData);
+    }
+  });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+  bindAnalysis();
   init();
   if ('serviceWorker' in navigator && /^https?:$/.test(window.location.protocol)) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});

@@ -815,7 +815,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log('');
-  console.log('  🏀  NBA Analytics Dashboard');
+  console.log('  🏀  GS Stats PRO');
   console.log(`  ➜  http://localhost:${PORT}`);
   console.log(`  ➜  Temporada ${SEASON_LABEL} (ESPN)`);
   console.log('');
