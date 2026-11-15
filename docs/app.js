@@ -54,7 +54,7 @@ const PROP_MARKETS = [
 const PAGE_META = {
   overview: ['Visão geral', 'Jogos do dia, sugestões de props e probabilidades estimadas.'],
   teams: ['Times', 'Últimos jogos, produção ofensiva, defesa e confrontos.'],
-  players: ['Jogadores', 'Pontuação, rebotes, assistências e eficiência jogo a jogo.'],
+  players: ['Jogadores', 'Análise de mercados com linha, odd da 99play e aproveitamento L5/L10/L20.'],
   combos: ['Combos', 'Média, mediana e aproveitamento contra a linha de over/under.'],
   compare: ['Comparador', 'Dois jogadores lado a lado, com perfil e produção.'],
 };
@@ -1459,7 +1459,8 @@ function renderPlayer(data) {
 
   if (!games.length) {
     $('#player-kpis').innerHTML = '';
-    destroyCharts(['chart-player-scoring', 'chart-player-pra', 'chart-player-shots', 'chart-player-eff']);
+    $('#player-analysis').innerHTML = '';
+    destroyCharts(['chart-player-scoring', 'chart-player-pra', 'chart-player-shots', 'chart-player-eff', 'chart-player-market']);
     $('#player-games-table').innerHTML = '<div class="empty">Nenhum jogo nesta temporada regular.</div>';
     return;
   }
