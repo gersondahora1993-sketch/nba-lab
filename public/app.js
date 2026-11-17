@@ -799,6 +799,7 @@ async function loadSlateInsights(games) {
   if (token !== state.insightsToken) return;
   renderOverviewRadar();
   renderOverviewStars();
+  loadTeamPropsOfDay().catch(() => {});
 }
 
 async function attachOdds(bets) {
@@ -995,6 +996,12 @@ function openPlayer(id, name) {
 
 function bindOverviewInteractions() {
   document.addEventListener('click', (event) => {
+    const teamTarget = event.target.closest('[data-team-id]');
+    if (teamTarget && teamTarget.closest('#team-props-list')) {
+      openTeam(teamTarget.dataset.teamId, teamTarget.dataset.teamName);
+      return;
+    }
+
     const target = event.target.closest('[data-player-id]');
     if (!target) return;
     if (!target.closest('#overview-stars, #radar-list, #slate-grid')) return;
@@ -1075,8 +1082,9 @@ async function loadCompareTeam(id) {
 
 function renderTeam(data, compare) {
   const { team, games, record, averages: avg, oppAverages: opp, leaders } = data;
+  const recent = games.slice(0, state.teamLast);
 
-  const form = [...games].reverse()
+  const form = [...recent].reverse()
     .map((g) => `<span class="form-dot ${g.win ? 'w' : 'l'}">${g.win ? 'V' : 'D'}</span>`)
     .join('');
 
@@ -1087,8 +1095,8 @@ function renderTeam(data, compare) {
         <span class="badge">${record.wins}V · ${record.losses}D</span>
       </div>
       <div class="entity-sub">
-        <span>Últimos ${games.length} jogos</span>
-        <span>·</span><span>Temporada ${escapeHtml(data.season)}</span>
+        <span>${games.length} jogos na temporada</span>
+        <span>·</span><span>${escapeHtml(data.season)}</span>
         <span>·</span><span>${fmt(avg.pts, 1)} pts/jogo</span>
       </div>
     </div>
@@ -1114,13 +1122,21 @@ function renderTeam(data, compare) {
       <div class="kpi-sub">${k.sub}</div>
     </div>`).join('');
 
-  renderTeamPointsChart(games);
-  renderTeamScoringChart(games);
+  renderTeamPointsChart(recent);
+  renderTeamScoringChart(recent);
   renderTeamStatToggles();
-  renderTeamStatsChart(games);
+  renderTeamStatsChart(recent);
   renderTeamRadar(team, avg, compare);
-  renderTeamTable(games, team);
+  renderTeamTable(recent, team);
   renderTeamLeaders(leaders);
+
+  const loading = ensureTeamAnalysis(data);
+  renderTeamAnalysis(data);
+  loading.then((changed) => {
+    if (changed && state.teamData && String(state.teamData.team.id) === String(team.id)) {
+      renderTeamAnalysis(state.teamData);
+    }
+  });
 }
 
 function renderTeamPointsChart(games) {
@@ -2638,8 +2654,443 @@ function bindAnalysis() {
   });
 }
 
+/* ============================================= ANÁLISE DE TIMES (totais) */
+
+const TEAM_MARKET_LIST = [
+  { key: 'pts', label: 'Pontos' },
+  { key: 'reb', label: 'Rebotes' },
+  { key: 'ast', label: 'Assistências' },
+  { key: 'tpm', label: 'Cestas de 3' },
+  { key: 'stl', label: 'Roubos' },
+  { key: 'blk', label: 'Tocos' },
+];
+
+const teamAnalysisState = {
+  market: 'pts',
+  lines: new Map(),
+  book: null,
+  log: null,
+};
+
+function overProbability(values, line) {
+  if (!values?.length) return null;
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  const sd = Math.max(stdDev(values), 0.55);
+  const hits = values.filter((v) => v > line).length;
+  const empirical = hits / values.length;
+  const model = 1 - normalCdf((line - mean) / sd);
+  const last5 = values.slice(0, 5);
+  const recent = last5.length ? last5.filter((v) => v > line).length / last5.length : empirical;
+  const p = 0.55 * empirical + 0.30 * model + 0.15 * recent;
+  return Math.min(0.95, Math.max(0.25, p));
+}
+
+// Melhor entrada: entre as linhas ofertadas, a de maior probabilidade
+// mantendo uma odd jogável (nem 1.01, nem 3.00).
+function bestTeamEntry(ladder, values) {
+  if (!ladder?.length || !values?.length) return null;
+  let best = null;
+  for (const row of ladder) {
+    if (row.over == null || row.over < 1.3 || row.over > 2.2) continue;
+    const p = overProbability(values, row.line);
+    if (p == null) continue;
+    if (!best || p > best.p + 1e-9 || (Math.abs(p - best.p) < 1e-9 && row.over > best.over)) {
+      best = { ...row, p };
+    }
+  }
+  return best;
+}
+
+function teamMarketValue(key, stats) {
+  const s = stats || {};
+  if (key === 'stocks') return (Number(s.stl) || 0) + (Number(s.blk) || 0);
+  return Number.isFinite(Number(s[key])) ? Number(s[key]) : null;
+}
+
+async function loadTeamBook(team) {
+  await ensureBookSlate();
+  const event = findBookEvent({ abbr: team.abbr, name: team.fullName || team.name });
+  if (!event) return { event: null, props: null };
+  try {
+    const details = await api(`/api/book/event/${event.id}`);
+    return {
+      event: { ...event, startDate: details.startDate || event.startDate },
+      props: details.teamProps?.[team.abbr] || null,
+    };
+  } catch {
+    return { event, props: null };
+  }
+}
+
+const teamAnalysisLoads = new Map();
+
+async function ensureTeamAnalysis(data) {
+  const team = data.team;
+  if (!team) return false;
+  const key = String(team.id);
+  if (teamAnalysisState.book?.teamId === key && teamAnalysisState.log?.teamId === key) return false;
+
+  if (!teamAnalysisLoads.has(key)) {
+    const promise = Promise.all([
+      loadTeamBook(team).catch(() => ({ event: null, props: null })),
+      api(`/api/team-log/${key}?last=82`).catch(() => ({ games: [] })),
+    ])
+      .then(([book, log]) => {
+        teamAnalysisState.book = { teamId: key, ...book };
+        teamAnalysisState.log = { teamId: key, games: log.games || [] };
+      })
+      .finally(() => teamAnalysisLoads.delete(key));
+    teamAnalysisLoads.set(key, promise);
+  }
+
+  await teamAnalysisLoads.get(key);
+  return true;
+}
+
+function renderTeamAnalysis(data) {
+  const host = $('#team-analysis');
+  if (!host || !data?.team) return;
+  const { team, games } = data;
+  const market = TEAM_MARKET_LIST.find((m) => m.key === teamAnalysisState.market) || TEAM_MARKET_LIST[0];
+  const log = teamAnalysisState.log?.teamId === String(team.id) ? teamAnalysisState.log.games : null;
+  const ordered = [...(log?.length ? log : games)].reverse();
+  const series = ordered
+    .map((game) => ({ date: game.date, opp: game.opp, value: teamMarketValue(market.key, game.stats) }))
+    .filter((row) => Number.isFinite(row.value));
+  const values = series.map((row) => row.value);
+  const newestFirst = [...values].reverse();
+
+  const book = teamAnalysisState.book?.teamId === String(team.id) ? teamAnalysisState.book : null;
+  const bookMarket = book?.props?.[market.key] || null;
+  const best = bestTeamEntry(bookMarket?.lines, newestFirst);
+  const pending = teamAnalysisLoads.has(String(team.id));
+
+  const lineKey = `${team.id}:${market.key}`;
+  const stored = teamAnalysisState.lines.get(lineKey);
+  const line = stored != null
+    ? stored
+    : (best?.line ?? bookMarket?.line ?? defaultLine(values, market));
+  const rowAtLine = bookMarket?.lines?.find((row) => Math.abs(row.line - line) < 0.001);
+  const overOdd = rowAtLine?.over ?? (bookMarket && Math.abs(bookMarket.line - line) < 0.001 ? bookMarket.over : null);
+  const underOdd = rowAtLine?.under ?? (bookMarket && Math.abs(bookMarket.line - line) < 0.001 ? bookMarket.under : null);
+
+  const avg = values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
+  const l5 = windowHits(values, line, 5);
+  const l10 = windowHits(values, line, 10);
+  const l20 = windowHits(values, line, 20);
+  const season = windowHits(values, line, 0);
+
+  const matchup = book?.event
+    ? `${book.event.teams.map((t) => t.abbr).join(' x ')} · ${gameTimeLabel(book.event.startDate)}`
+    : '';
+
+  const tabs = TEAM_MARKET_LIST.map((m) => `
+    <button type="button" class="market-tab ${m.key === market.key ? 'active' : ''}" data-team-market="${m.key}">${m.label}</button>
+  `).join('');
+
+  const unavailable = !values.length;
+  const step = 0.5;
+
+  host.innerHTML = `
+    <div class="card market-card">
+      <div class="market-head">
+        <div>
+          <span class="eyebrow">Análise de mercados do time</span>
+          <h3>${escapeHtml(market.label)} <span class="market-player">· ${escapeHtml(team.fullName || team.name)}</span></h3>
+          <span class="hint">${matchup ? escapeHtml(matchup) : pending ? 'Buscando odd da 99play e histórico da temporada…' : 'Jogo de hoje ainda não está na 99play — linha manual disponível'}</span>
+        </div>
+        <div class="odd-box ${overOdd ? 'on' : 'off'}">
+          <span>Odd 99play</span>
+          <strong>${overOdd ? fmt(overOdd, 2) : pending ? '…' : '—'}</strong>
+          <small>${overOdd && underOdd ? `menos ${fmt(underOdd, 2)}` : overOdd ? 'linha da casa' : pending ? 'carregando' : 'linha manual'}</small>
+        </div>
+      </div>
+
+      <div class="market-tabs">${tabs}</div>
+
+      <div class="line-row">
+        <span class="line-label">Linha</span>
+        <div class="stepper">
+          <button type="button" class="step" data-team-line-step="-${step}" data-current="${line}">−</button>
+          <strong>${fmt(line, 1)}</strong>
+          <button type="button" class="step" data-team-line-step="${step}" data-current="${line}">+</button>
+        </div>
+        ${best && Math.abs(best.line - line) > 0.001 ? `<button type="button" class="line-reset" data-team-line-best>melhor entrada ${fmt(best.line, 1)} · ${fmt(best.over, 2)}</button>` : ''}
+        ${bookMarket && Math.abs(bookMarket.line - line) > 0.001 ? `<button type="button" class="line-reset" data-team-line-reset>linha da casa ${fmt(bookMarket.line, 1)}</button>` : ''}
+        <span class="line-avg">média ${avg != null ? fmt(avg, 1) : '—'}</span>
+      </div>
+
+      ${unavailable ? `
+        <div class="market-empty">
+          <strong>Sem dados para este mercado.</strong>
+          <span>Nenhum jogo do time nesta temporada com esse total disponível.</span>
+        </div>` : `
+        <div class="hit-grid">
+          ${hitTile('L5', l5)}
+          ${hitTile('L10', l10)}
+          ${hitTile('L20', l20)}
+          ${hitTile('Temporada', season)}
+        </div>
+        <div class="chart-box market-chart"><canvas id="chart-team-market"></canvas></div>
+        <div class="market-legend">
+          <span><i class="dot-green"></i>acima de ${fmt(line, 1)}</span>
+          <span><i class="dot-red"></i>abaixo de ${fmt(line, 1)}</span>
+          <span>${series.length} jogos · ${values.filter((v) => v > line).length} acima da linha</span>
+        </div>
+      `}
+      ${market.key === 'reb' ? `<div class="market-note">A 99play não abre mercado de rebotes por time — a linha é manual, mas o histórico é o oficial da ESPN.</div>` : ''}
+      <div class="market-foot">
+        <a class="book-link" href="https://99play.io/sports#/sport/67" target="_blank" rel="noopener">Conferir odds na 99play ↗</a>
+        <span class="hint">Análise gratuita · sem assinatura</span>
+      </div>
+    </div>`;
+
+  if (!unavailable) drawTeamMarketChart(market, series, line);
+  else destroyCharts(['chart-team-market']);
+}
+
+function drawTeamMarketChart(market, series, line) {
+  const shown = series.slice(-20);
+  const values = shown.map((row) => row.value);
+  const colors = values.map((v) => (v > line ? 'rgba(34,197,94,.85)' : 'rgba(239,68,68,.82)'));
+
+  makeChart('chart-team-market', {
+    type: 'bar',
+    data: {
+      labels: shown.map((row) => shortDate(row.date)),
+      datasets: [{
+        label: market.label,
+        data: values,
+        backgroundColor: colors,
+        borderColor: colors,
+        borderWidth: 1,
+        borderRadius: 4,
+        maxBarThickness: 34,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            afterLabel: (ctx) => {
+              const item = shown[ctx.dataIndex];
+              return item?.opp?.abbr ? `vs ${item.opp.abbr}` : '';
+            },
+          },
+        },
+      },
+      scales: {
+        x: xAxis(),
+        y: yAxis({ beginAtZero: true, ticks: { color: '#8b8b96', precision: 0 } }),
+      },
+    },
+    plugins: [hLinePlugin(line, `linha ${fmt(line, 1)}`, '#f8fafc')],
+  });
+}
+
+let teamAnalysisBound = false;
+function bindTeamAnalysis() {
+  if (teamAnalysisBound) return;
+  teamAnalysisBound = true;
+  document.addEventListener('click', (event) => {
+    const tab = event.target.closest('#team-analysis [data-team-market]');
+    if (tab) {
+      teamAnalysisState.market = tab.dataset.teamMarket;
+      if (!state.teamData) return;
+      renderTeamAnalysis(state.teamData);
+      ensureTeamAnalysis(state.teamData).then((changed) => {
+        if (changed && state.teamData) renderTeamAnalysis(state.teamData);
+      });
+      return;
+    }
+
+    const stepBtn = event.target.closest('#team-analysis [data-team-line-step]');
+    if (stepBtn && state.teamData) {
+      const market = TEAM_MARKET_LIST.find((m) => m.key === teamAnalysisState.market) || TEAM_MARKET_LIST[0];
+      const key = `${state.teamData.team.id}:${market.key}`;
+      const current = Number(teamAnalysisState.lines.get(key) ?? stepBtn.dataset.current ?? 0);
+      const next = Math.max(0, Math.round((current + Number(stepBtn.dataset.teamLineStep)) * 10) / 10);
+      teamAnalysisState.lines.set(key, next);
+      renderTeamAnalysis(state.teamData);
+      return;
+    }
+
+    const bestBtn = event.target.closest('#team-analysis [data-team-line-best]');
+    if (bestBtn && state.teamData) {
+      const market = TEAM_MARKET_LIST.find((m) => m.key === teamAnalysisState.market) || TEAM_MARKET_LIST[0];
+      const book = teamAnalysisState.book?.teamId === String(state.teamData.team.id) ? teamAnalysisState.book : null;
+      const bookMarket = book?.props?.[market.key];
+      const log = teamAnalysisState.log?.teamId === String(state.teamData.team.id) ? teamAnalysisState.log.games : null;
+      const base = log?.length ? log : state.teamData.games;
+      const values = [...base].reverse()
+        .map((game) => teamMarketValue(market.key, game.stats))
+        .filter((v) => Number.isFinite(v))
+        .reverse();
+      const best = bestTeamEntry(bookMarket?.lines, values);
+      if (best) {
+        teamAnalysisState.lines.set(`${state.teamData.team.id}:${market.key}`, best.line);
+        renderTeamAnalysis(state.teamData);
+      }
+      return;
+    }
+
+    if (event.target.closest('#team-analysis [data-team-line-reset]') && state.teamData) {
+      const market = TEAM_MARKET_LIST.find((m) => m.key === teamAnalysisState.market) || TEAM_MARKET_LIST[0];
+      teamAnalysisState.lines.delete(`${state.teamData.team.id}:${market.key}`);
+      renderTeamAnalysis(state.teamData);
+    }
+  });
+}
+
+/* ------------------------------------- props de times do dia (overview) */
+
+function openTeam(id) {
+  if (!id) return;
+  goTo('teams');
+  $('#team-select').value = String(id);
+  const compare = $('#team-compare-select');
+  if (compare && compare.value === String(id)) compare.value = '';
+  loadTeam(id);
+}
+
+let teamPropsToken = 0;
+let teamPropsSignature = '';
+
+async function loadTeamPropsOfDay() {
+  const section = $('#overview-team-props');
+  const list = $('#team-props-list');
+  if (!section || !list) return;
+  const games = state.slateGames || [];
+  if (!games.length) {
+    section.hidden = true;
+    return;
+  }
+  const bucket = Math.floor(Date.now() / (10 * 60 * 1000));
+  const signature = `${state.slateSignature}:${bucket}`;
+  if (teamPropsSignature === signature && list.dataset.ready === '1') return;
+  const token = ++teamPropsToken;
+
+  await ensureBookSlate();
+  if (!state.bookEvents?.length) {
+    section.hidden = true;
+    return;
+  }
+
+  const eventBySide = new Map();
+  for (const game of games) {
+    for (const side of game.competitors || []) {
+      const event = findBookEvent({ abbr: side.abbr, name: side.name });
+      if (event) eventBySide.set(String(side.id), { side, event, game });
+    }
+  }
+
+  const rows = [];
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  await mapLimit([...eventBySide.values()], 2, async ({ side, event, game }) => {
+    let details = null;
+    for (let attempt = 0; attempt < 2 && !details; attempt += 1) {
+      try {
+        details = await api(`/api/book/event/${event.id}`);
+      } catch {
+        await wait(600);
+      }
+    }
+    if (!details) return;
+    const props = details.teamProps?.[side.abbr];
+    if (!props) return;
+
+    let log = null;
+    try {
+      log = await api(`/api/team-log/${side.id}?last=20&light=1`);
+    } catch {
+      return;
+    }
+
+    for (const market of TEAM_MARKET_LIST) {
+      const book = props[market.key];
+      if (!book?.lines?.length) continue;
+      const series = (log.games || [])
+        .map((entry) => teamMarketValue(market.key, entry.stats))
+        .filter((v) => Number.isFinite(v));
+      if (series.length < 4) continue;
+      const entry = bestTeamEntry(book.lines, series);
+      if (!entry) continue;
+      const probability = Math.round(entry.p * 100);
+      if (probability < 52) continue;
+      rows.push({
+        team: side,
+        market,
+        line: entry.line,
+        odd: entry.over,
+        probability,
+        hits: series.filter((v) => v > entry.line).length,
+        total: series.length,
+        recent: series.slice(0, 10),
+        event: { ...event, startDate: details.startDate || event.startDate },
+        gameId: game.id,
+      });
+    }
+  });
+
+  if (token !== teamPropsToken) return;
+
+  if (!rows.length) {
+    section.hidden = true;
+    return;
+  }
+
+  rows.sort((a, b) => b.probability - a.probability || (b.odd || 0) - (a.odd || 0));
+  const uniqueTeams = new Set(rows.map((row) => row.team.id)).size;
+  // uma linha por time (a melhor entrada), como na lista de referência
+  const seenTeams = new Set();
+  const top = [];
+  for (const row of rows) {
+    if (seenTeams.has(row.team.id)) continue;
+    seenTeams.add(row.team.id);
+    top.push(row);
+    if (top.length >= 10) break;
+  }
+
+  section.hidden = false;
+  const hint = $('#team-props-hint');
+  if (hint) hint.textContent = `${rows.length} entradas em ${uniqueTeams} times · odd real da 99play`;
+
+  list.innerHTML = top.map((row, index) => {
+    const recent = [...row.recent].reverse();
+    const max = Math.max(1, ...recent);
+    const spark = recent.map((v) => `<i class="${v > row.line ? 'on' : 'off'}" style="height:${Math.max(12, Math.round((v / max) * 100))}%"></i>`).join('');
+    const opp = (row.event.teams || []).find((t) => t.abbr !== row.team.abbr);
+    return `
+    <button type="button" class="radar-item" data-team-id="${escapeHtml(row.team.id)}" data-team-name="${escapeHtml(row.team.name || row.team.abbr)}">
+      <span class="radar-rank">${index + 1}</span>
+      <img src="${escapeHtml(row.team.logo || '')}" alt="" onerror="this.style.opacity='.15'" />
+      <span class="radar-body">
+        <span class="radar-top">
+          <strong>${escapeHtml(row.team.name || row.team.abbr)}</strong>
+          <span class="badge blue">${escapeHtml(row.team.abbr)}</span>
+          <span class="radar-prob">${row.probability}%</span>
+        </span>
+        <span class="radar-bet">Over ${fmt(row.line, 1)} ${escapeHtml(row.market.label)}${opp ? ` <span class="radar-match">vs ${escapeHtml(opp.abbr || opp.name || '')} · ${gameTimeLabel(row.event.startDate)}</span>` : ''}</span>
+        <span class="radar-meta">
+          <span class="spark">${spark}</span>
+          <span class="radar-hit">${row.hits}/${row.total} acima</span>
+          <span class="radar-odd on">${fmt(row.odd, 2)}</span>
+        </span>
+        <span class="radar-bar"><i style="width:${row.probability}%"></i></span>
+      </span>
+    </button>`;
+  }).join('');
+
+  teamPropsSignature = signature;
+  list.dataset.ready = '1';
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   bindAnalysis();
+  bindTeamAnalysis();
   init();
   if ('serviceWorker' in navigator && /^https?:$/.test(window.location.protocol)) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});

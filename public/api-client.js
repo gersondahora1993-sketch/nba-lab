@@ -543,6 +543,86 @@
     });
   }
 
+  // Série enxuta do time (1 request por jogo na API core) usada na lista
+  // de props de times do dia — evita baixar boxscores completos de 18 times.
+  // light=true pula o calendário (sem datas/adversários) e serve só a lista.
+  async function getTeamGameLog(teamId, last = 20, light = false) {
+    const key = `teamlog:${teamId}:${SEASON}:${light ? 'l' : 'f'}${last}`;
+    return cached(key, 6 * 3600 * 1000, async () => {
+      const list = await espn(
+        `${ESPN_CORE}/seasons/${SEASON}/types/2/teams/${teamId}/events?limit=100`,
+        6 * 3600,
+        `teamevents:${teamId}:${SEASON}`
+      );
+      // ids do mais recente para o mais antigo
+      const ids = (list.items || [])
+        .map((item) => String(item.$ref || '').match(/events\/(\d+)/)?.[1])
+        .filter(Boolean)
+        .reverse();
+      if (!ids.length) return [];
+
+      // todos os eventos (mais recente primeiro). Jogos futuros sem boxscore
+      // são descartados pelo filtro de pontos abaixo.
+      const fetchIds = ids;
+
+      let scheduleMap = new Map();
+      if (!light) {
+        try {
+          const schedule = await espn(
+            `${ESPN}/teams/${teamId}/schedule?season=${SEASON}`,
+            1800,
+            `schedule:${teamId}:${SEASON}`
+          );
+          for (const event of schedule?.events || []) scheduleMap.set(String(event.id), event);
+        } catch { /* opcional */ }
+      }
+
+      const games = new Array(fetchIds.length).fill(null);
+      await mapLimit(fetchIds, light ? 5 : 8, async (eventId, index) => {
+        try {
+          const stats = await espn(
+            `${ESPN_CORE}/events/${eventId}/competitions/${eventId}/competitors/${teamId}/statistics`,
+            6 * 3600,
+            `teamgame:${teamId}:${eventId}`
+          );
+          const values = {};
+          for (const category of stats.splits?.categories || []) {
+            for (const stat of category.stats || []) values[stat.name] = stat.value;
+          }
+          if (!Number.isFinite(Number(values.points))) return;
+          const event = scheduleMap.get(String(eventId));
+          const comp = event?.competitions?.[0];
+          const me = (comp?.competitors || []).find((c) => String(c.team?.id) === String(teamId));
+          const opp = (comp?.competitors || []).find((c) => String(c.team?.id) !== String(teamId));
+          games[index] = {
+            eventId: String(eventId),
+            date: event?.date || '',
+            home: me?.homeAway === 'home',
+            opp: opp ? {
+              id: String(opp.team?.id || ''),
+              abbr: opp.team?.abbreviation || '',
+              name: opp.team?.displayName || '',
+              logo: opp.team?.logo || '',
+            } : null,
+            stats: {
+              pts: Number(values.points) || 0,
+              reb: Number(values.totalRebounds) || 0,
+              ast: Number(values.assists) || 0,
+              tpm: Number(values.threePointFieldGoalsMade) || 0,
+              tpa: Number(values.threePointFieldGoalsAttempted) || 0,
+              stl: Number(values.steals) || 0,
+              blk: Number(values.blocks) || 0,
+              to: Number(values.turnovers) || 0,
+              pf: Number(values.fouls) || 0,
+            },
+          };
+        } catch { /* jogo futuro ou sem estatística */ }
+      });
+      // jogos mais recentes primeiro; mantém os últimos `last` com estatística
+      return games.filter(Boolean).slice(0, last);
+    });
+  }
+
   function playerCombo(stats) {
     const { pts, reb, ast, stl, blk, tpm } = stats;
     const dd = [pts, reb, ast, stl, blk].filter((v) => v >= 10).length;
@@ -815,6 +895,77 @@
     2220: 'td',
   };
 
+  // Totais de time: a casa abre em escada (várias linhas no mesmo mercado).
+  const TEAM_BOOK_MARKETS = {
+    227: 'pts', 228: 'pts',
+    2257: 'tpm', 2258: 'tpm',
+    2265: 'ast', 2266: 'ast',
+    2269: 'stl', 2270: 'stl',
+    2273: 'blk', 2274: 'blk',
+  };
+
+  function teamFromMarketName(name, teams) {
+    const target = normText(name);
+    return teams.find((team) => {
+      const full = normText(team.name);
+      if (!full) return false;
+      return target.startsWith(full) || target.includes(` ${full} `) || target.includes(`- ${full} `);
+    }) || null;
+  }
+
+  function parseTeamProps(json, teams, oddsById) {
+    const out = {};
+    for (const market of json.markets || []) {
+      const key = TEAM_BOOK_MARKETS[market.typeId];
+      if (!key) continue;
+      const team = teamFromMarketName(market.name || '', teams);
+      if (!team) continue;
+
+      const ladder = new Map();
+      const groups = market.desktopOddIds || market.mobileOddIds || [];
+      for (const group of groups) {
+        for (const oddId of group || []) {
+          const odd = oddsById.get(oddId);
+          if (!odd) continue;
+          const match = /(mais|menos)\s+de\s+([\d.,]+)/i.exec(odd.name || '');
+          if (!match) continue;
+          const raw = match[2];
+          const line = Number(raw.includes(',') ? raw.replace(/\./g, '').replace(',', '.') : raw);
+          if (!Number.isFinite(line)) continue;
+          const entry = ladder.get(line) || { line };
+          if (/mais/i.test(match[1])) entry.over = odd.price ?? null;
+          else entry.under = odd.price ?? null;
+          ladder.set(line, entry);
+        }
+      }
+      if (!ladder.size) continue;
+
+      const lines = [...ladder.values()].sort((a, b) => a.line - b.line);
+      let main = null;
+      let bestDiff = Infinity;
+      for (const row of lines) {
+        if (row.over == null || row.under == null) continue;
+        const diff = Math.abs(row.over - row.under);
+        if (diff < bestDiff) {
+          bestDiff = diff;
+          main = row;
+        }
+      }
+      const chosen = main || lines[Math.floor(lines.length / 2)];
+
+      out[team.abbr] = out[team.abbr] || {};
+      if (!out[team.abbr][key]) {
+        out[team.abbr][key] = {
+          line: chosen.line,
+          over: chosen.over ?? null,
+          under: chosen.under ?? null,
+          lines,
+        };
+      }
+    }
+    return out;
+  }
+
   function parseBookEvent(json) {
     const teams = (json.competitors || []).map((c) => ({
       id: String(c.id),
@@ -868,6 +1019,7 @@
       startDate: json.startDate || '',
       teams,
       props,
+      teamProps: parseTeamProps(json, teams, oddsById),
     };
   }
 
@@ -1008,9 +1160,16 @@
       return getBookEvent(bookMatch[1]);
     }
 
+    const teamLogMatch = pathname.match(/^\/api\/team-log\/(\d+)$/);
+    if (teamLogMatch) {
+      const last = Math.min(Math.max(Number(url.searchParams.get('last') || 20), 1), 82);
+      const light = url.searchParams.get('light') === '1';
+      return { teamId: teamLogMatch[1], games: await getTeamGameLog(teamLogMatch[1], last, light) };
+    }
+
     const teamMatch = pathname.match(/^\/api\/team\/(\d+)$/);
     if (teamMatch) {
-      const last = Math.min(Math.max(Number(url.searchParams.get('last') || 10), 1), 20);
+      const last = Math.min(Math.max(Number(url.searchParams.get('last') || 10), 1), 82);
       return getTeamDashboard(teamMatch[1], last);
     }
 
