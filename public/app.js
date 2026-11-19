@@ -2360,7 +2360,11 @@ async function loadBookPropsFor(player) {
     const details = await api(`/api/book/event/${event.id}`);
     const target = nameKey(player.name);
     const entry = Object.entries(details.props || {}).find(([key]) => nameKey(key) === target);
-    return { event: { ...event, startDate: details.startDate || event.startDate }, props: entry ? entry[1] : null };
+    return {
+      event: { ...event, startDate: details.startDate || event.startDate },
+      props: entry ? entry[1] : null,
+      betUrl: `https://99play.io/sports#/sport/67`,
+    };
   } catch {
     return { event, props: null };
   }
@@ -2522,11 +2526,17 @@ function renderPlayerAnalysis(data) {
           <h3>${escapeHtml(market.label)} <span class="market-player">· ${escapeHtml(player.name)}</span></h3>
           <span class="hint">${matchup ? escapeHtml(matchup) : 'Selecione o jogador do jogo do dia para ver a odd da 99play'}</span>
         </div>
-        <div class="odd-box ${oddLine && overOdd ? 'on' : 'off'}">
+        ${oddLine && overOdd ? `
+        <a href="${book?.betUrl || 'https://99play.io/sports#/sport/67'}" target="_blank" rel="noopener" class="odd-box-link odd-box on">
           <span>Odd 99play</span>
-          <strong>${oddLine && overOdd ? fmt(overOdd, 2) : '—'}</strong>
-          <small>${oddLine && underOdd ? `menos ${fmt(underOdd, 2)}` : oddLine ? 'linha da casa' : 'linha manual'}</small>
-        </div>
+          <strong>${fmt(overOdd, 2)}</strong>
+          <small>${underOdd ? `menos ${fmt(underOdd, 2)}` : 'linha da casa'}</small>
+        </a>` : `
+        <div class="odd-box off">
+          <span>Odd 99play</span>
+          <strong>—</strong>
+          <small>linha manual</small>
+        </div>`}
       </div>
 
       <div class="market-tabs">${tabs}</div>
@@ -2739,6 +2749,7 @@ async function loadTeamBook(team) {
     results['99play'] = {
       event: { ...event, startDate: details.startDate || event.startDate },
       props: details.teamProps?.[team.abbr] || null,
+      betUrl: `https://99play.io/sports#/sport/67`,
     };
   } catch { /* 99play falhou */ }
 
@@ -2748,6 +2759,7 @@ async function loadTeamBook(team) {
     results['br365'] = {
       event: { ...event, startDate: details.startDate || event.startDate },
       props: details.teamProps?.[team.abbr] || null,
+      betUrl: `https://www.br365.io/sports#/basketball`,
     };
   } catch { /* br365 indisponível (API protegida) */ }
 
@@ -2866,16 +2878,27 @@ function renderTeamAnalysis(data) {
           <span class="hint">${matchup ? escapeHtml(matchup) : pending ? 'Buscando odds e histórico da temporada…' : 'Jogo de hoje ainda não está nas casas — linha manual disponível'}</span>
           ${bestOddBadge}
         </div>
-        <div class="odd-box ${overOdd ? 'on' : 'off'}">
+        ${overOdd ? `
+        <a href="${books['99play']?.betUrl || 'https://99play.io/sports#/sport/67'}" target="_blank" rel="noopener" class="odd-box-link odd-box ${overOdd ? 'on' : 'off'}">
           <span>Odd 99play</span>
-          <strong>${overOdd ? fmt(overOdd, 2) : pending ? '…' : '—'}</strong>
-          <small>${overOdd && underOdd ? `menos ${fmt(underOdd, 2)}` : overOdd ? 'linha da casa' : pending ? 'carregando' : 'linha manual'}</small>
-        </div>
-        ${br365Market ? `
-        <div class="odd-box ${oddByBook.br365 ? 'on' : 'off'}">
+          <strong>${fmt(overOdd, 2)}</strong>
+          <small>${overOdd && underOdd ? `menos ${fmt(underOdd, 2)}` : 'linha da casa'}</small>
+        </a>` : `
+        <div class="odd-box off">
+          <span>Odd 99play</span>
+          <strong>${pending ? '…' : '—'}</strong>
+          <small>${pending ? 'carregando' : 'linha manual'}</small>
+        </div>`}
+        ${br365Market && oddByBook.br365 ? `
+        <a href="${books['br365']?.betUrl || 'https://www.br365.io/sports#/basketball'}" target="_blank" rel="noopener" class="odd-box-link odd-box on">
           <span>Odd br365</span>
-          <strong>${oddByBook.br365 ? fmt(oddByBook.br365, 2) : '—'}</strong>
+          <strong>${fmt(oddByBook.br365, 2)}</strong>
           <small>${bestOddBook === 'br365' ? 'melhor odd' : 'linha da casa'}</small>
+        </a>` : br365Market ? `
+        <div class="odd-box off">
+          <span>Odd br365</span>
+          <strong>—</strong>
+          <small>sem odd para esta linha</small>
         </div>` : ''}
       </div>
 
@@ -3120,6 +3143,8 @@ async function loadTeamPropsOfDay() {
         recent: series.slice(0, 10),
         event: { ...event, startDate: details.startDate || event.startDate },
         gameId: game.id,
+        betUrl: `https://99play.io/sports#/sport/67`,
+        bookName: '99play',
       });
     }
   });
@@ -3166,7 +3191,11 @@ async function loadTeamPropsOfDay() {
         <span class="radar-meta">
           <span class="spark">${spark}</span>
           <span class="radar-hit">${row.hits}/${row.total} acima</span>
-          <span class="radar-odd on">${fmt(row.odd, 2)}</span>
+          ${row.odd ? `
+          <a href="${escapeHtml(row.betUrl)}" target="_blank" rel="noopener" class="radar-odd-link">
+            <span class="radar-odd on">${fmt(row.odd, 2)}</span>
+          </a>` : `
+          <span class="radar-odd off">—</span>`}
         </span>
         <span class="radar-bar"><i style="width:${row.probability}%"></i></span>
       </span>
