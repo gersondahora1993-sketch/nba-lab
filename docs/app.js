@@ -2668,7 +2668,7 @@ const TEAM_MARKET_LIST = [
 const teamAnalysisState = {
   market: 'pts',
   lines: new Map(),
-  book: null,
+  books: {},   // { '99play': {teamId,event,props}, 'br365': {...} }
   log: null,
 };
 
@@ -2685,12 +2685,12 @@ function overProbability(values, line) {
   return Math.min(0.95, Math.max(0.25, p));
 }
 
-// Melhor entrada: entre as linhas ofertadas, a de maior probabilidade
-// mantendo uma odd jogável (nem 1.01, nem 3.00).
-function bestTeamEntry(ladder, values) {
-  if (!ladder?.length || !values?.length) return null;
+// Melhor entrada considerando TODAS as casas: entre as linhas ofertadas,
+// a de maior probabilidade mantendo uma odd jogável (nem 1.01, nem 3.00).
+function bestTeamEntry(bookMarket, values) {
+  if (!bookMarket?.lines?.length || !values?.length) return null;
   let best = null;
-  for (const row of ladder) {
+  for (const row of bookMarket.lines) {
     if (row.over == null || row.over < 1.3 || row.over > 2.2) continue;
     const p = overProbability(values, row.line);
     if (p == null) continue;
@@ -2707,19 +2707,51 @@ function teamMarketValue(key, stats) {
   return Number.isFinite(Number(s[key])) ? Number(s[key]) : null;
 }
 
+// Busca a melhor odd entre todas as casas para um determinado mercado/time.
+function bestTeamEntryAcrossBooks(books, teamId, teamAbbr, marketKey, values) {
+  if (!books || !values?.length) return null;
+  let best = null;
+  let bestBook = null;
+  for (const [bookLabel, book] of Object.entries(books)) {
+    if (!book || book.teamId !== String(teamId)) continue;
+    const props = book.props?.[teamAbbr];
+    const bm = props?.[marketKey];
+    const entry = bestTeamEntry(bm, values);
+    if (!entry) continue;
+    if (!best || entry.p > best.p + 1e-9 || (Math.abs(entry.p - best.p) < 1e-9 && entry.over > best.over)) {
+      best = entry;
+      bestBook = bookLabel;
+    }
+  }
+  if (!best) return null;
+  return { ...best, book: bestBook };
+}
+
 async function loadTeamBook(team) {
   await ensureBookSlate();
   const event = findBookEvent({ abbr: team.abbr, name: team.fullName || team.name });
   if (!event) return { event: null, props: null };
+  const results = { '99play': null, 'br365': null };
+
+  // 99play (Altenar)
   try {
     const details = await api(`/api/book/event/${event.id}`);
-    return {
+    results['99play'] = {
       event: { ...event, startDate: details.startDate || event.startDate },
       props: details.teamProps?.[team.abbr] || null,
     };
-  } catch {
-    return { event, props: null };
-  }
+  } catch { /* 99play falhou */ }
+
+  // br365 (comparação)
+  try {
+    const details = await api(`/api/book-br365/event/${event.id}`);
+    results['br365'] = {
+      event: { ...event, startDate: details.startDate || event.startDate },
+      props: details.teamProps?.[team.abbr] || null,
+    };
+  } catch { /* br365 indisponível (API protegida) */ }
+
+  return results;
 }
 
 const teamAnalysisLoads = new Map();
@@ -2728,15 +2760,16 @@ async function ensureTeamAnalysis(data) {
   const team = data.team;
   if (!team) return false;
   const key = String(team.id);
-  if (teamAnalysisState.book?.teamId === key && teamAnalysisState.log?.teamId === key) return false;
+  const books = teamAnalysisState.books;
+  if (books[key] && books[key].teamId === key && teamAnalysisState.log?.teamId === key) return false;
 
   if (!teamAnalysisLoads.has(key)) {
     const promise = Promise.all([
-      loadTeamBook(team).catch(() => ({ event: null, props: null })),
+      loadTeamBook(team).catch(() => ({ '99play': null, 'br365': null })),
       api(`/api/team-log/${key}?last=82`).catch(() => ({ games: [] })),
     ])
-      .then(([book, log]) => {
-        teamAnalysisState.book = { teamId: key, ...book };
+      .then(([booksResult, log]) => {
+        books[key] = { teamId: key, ...booksResult };
         teamAnalysisState.log = { teamId: key, games: log.games || [] };
       })
       .finally(() => teamAnalysisLoads.delete(key));
@@ -2760,19 +2793,46 @@ function renderTeamAnalysis(data) {
   const values = series.map((row) => row.value);
   const newestFirst = [...values].reverse();
 
-  const book = teamAnalysisState.book?.teamId === String(team.id) ? teamAnalysisState.book : null;
-  const bookMarket = book?.props?.[market.key] || null;
-  const best = bestTeamEntry(bookMarket?.lines, newestFirst);
+  const books = teamAnalysisState.books[String(team.id)] || {};
   const pending = teamAnalysisLoads.has(String(team.id));
+
+  // Coleta o mercado de cada casa para exibir comparação de odds
+  const bookMarkets = {};
+  let mainBook = null;
+  for (const [label, book] of Object.entries(books)) {
+    if (!book) continue;
+    if (!mainBook) mainBook = book;
+    const bm = book.props?.[team.abbr]?.[market.key] || null;
+    bookMarkets[label] = bm;
+  }
+  const bookMarket = bookMarkets['99play'] || null;
+  const br365Market = bookMarkets['br365'] || null;
+
+  // Melhor entrada considerando todas as casas
+  const best = bestTeamEntryAcrossBooks(books, String(team.id), team.abbr, market.key, newestFirst);
 
   const lineKey = `${team.id}:${market.key}`;
   const stored = teamAnalysisState.lines.get(lineKey);
   const line = stored != null
     ? stored
-    : (best?.line ?? bookMarket?.line ?? defaultLine(values, market));
-  const rowAtLine = bookMarket?.lines?.find((row) => Math.abs(row.line - line) < 0.001);
-  const overOdd = rowAtLine?.over ?? (bookMarket && Math.abs(bookMarket.line - line) < 0.001 ? bookMarket.over : null);
-  const underOdd = rowAtLine?.under ?? (bookMarket && Math.abs(bookMarket.line - line) < 0.001 ? bookMarket.under : null);
+    : (best?.line ?? bookMarket?.line ?? br365Market?.line ?? defaultLine(values, market));
+
+  // Odd da linha selecionada em cada casa
+  const oddByBook = {};
+  for (const [label, bm] of Object.entries(bookMarkets)) {
+    if (!bm) continue;
+    const rowAtLine = bm.lines?.find((row) => Math.abs(row.line - line) < 0.001);
+    oddByBook[label] = rowAtLine?.over ?? (Math.abs(bm.line - line) < 0.001 ? bm.over : null);
+  }
+  const overOdd = oddByBook['99play'] ?? null;
+  const underOdd = bookMarket && Math.abs(bookMarket.line - line) < 0.001 ? bookMarket.under : null;
+
+  // Qual casa tem a melhor odd para esta linha
+  let bestOddBook = null;
+  let bestOddVal = -1;
+  for (const [label, odd] of Object.entries(oddByBook)) {
+    if (odd && odd > bestOddVal) { bestOddVal = odd; bestOddBook = label; }
+  }
 
   const avg = values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
   const l5 = windowHits(values, line, 5);
@@ -2780,8 +2840,9 @@ function renderTeamAnalysis(data) {
   const l20 = windowHits(values, line, 20);
   const season = windowHits(values, line, 0);
 
-  const matchup = book?.event
-    ? `${book.event.teams.map((t) => t.abbr).join(' x ')} · ${gameTimeLabel(book.event.startDate)}`
+  const mainEvent = mainBook?.event;
+  const matchup = mainEvent
+    ? `${mainEvent.teams.map((t) => t.abbr).join(' x ')} · ${gameTimeLabel(mainEvent.startDate)}`
     : '';
 
   const tabs = TEAM_MARKET_LIST.map((m) => `
@@ -2791,19 +2852,31 @@ function renderTeamAnalysis(data) {
   const unavailable = !values.length;
   const step = 0.5;
 
+  // Badge de qual casa tem a melhor odd
+  const bestOddBadge = bestOddBook
+    ? `<span class="badge ${bestOddBook === '99play' ? 'orange' : 'blue'}">melhor odd ${bestOddBook === '99play' ? '99play' : 'br365'}</span>`
+    : '';
+
   host.innerHTML = `
     <div class="card market-card">
       <div class="market-head">
         <div>
           <span class="eyebrow">Análise de mercados do time</span>
           <h3>${escapeHtml(market.label)} <span class="market-player">· ${escapeHtml(team.fullName || team.name)}</span></h3>
-          <span class="hint">${matchup ? escapeHtml(matchup) : pending ? 'Buscando odd da 99play e histórico da temporada…' : 'Jogo de hoje ainda não está na 99play — linha manual disponível'}</span>
+          <span class="hint">${matchup ? escapeHtml(matchup) : pending ? 'Buscando odds e histórico da temporada…' : 'Jogo de hoje ainda não está nas casas — linha manual disponível'}</span>
+          ${bestOddBadge}
         </div>
         <div class="odd-box ${overOdd ? 'on' : 'off'}">
           <span>Odd 99play</span>
           <strong>${overOdd ? fmt(overOdd, 2) : pending ? '…' : '—'}</strong>
           <small>${overOdd && underOdd ? `menos ${fmt(underOdd, 2)}` : overOdd ? 'linha da casa' : pending ? 'carregando' : 'linha manual'}</small>
         </div>
+        ${br365Market ? `
+        <div class="odd-box ${oddByBook.br365 ? 'on' : 'off'}">
+          <span>Odd br365</span>
+          <strong>${oddByBook.br365 ? fmt(oddByBook.br365, 2) : '—'}</strong>
+          <small>${bestOddBook === 'br365' ? 'melhor odd' : 'linha da casa'}</small>
+        </div>` : ''}
       </div>
 
       <div class="market-tabs">${tabs}</div>
@@ -2815,8 +2888,9 @@ function renderTeamAnalysis(data) {
           <strong>${fmt(line, 1)}</strong>
           <button type="button" class="step" data-team-line-step="${step}" data-current="${line}">+</button>
         </div>
-        ${best && Math.abs(best.line - line) > 0.001 ? `<button type="button" class="line-reset" data-team-line-best>melhor entrada ${fmt(best.line, 1)} · ${fmt(best.over, 2)}</button>` : ''}
-        ${bookMarket && Math.abs(bookMarket.line - line) > 0.001 ? `<button type="button" class="line-reset" data-team-line-reset>linha da casa ${fmt(bookMarket.line, 1)}</button>` : ''}
+        ${best && Math.abs(best.line - line) > 0.001 ? `<button type="button" class="line-reset" data-team-line-best>melhor entrada ${fmt(best.line, 1)} · ${fmt(best.over, 2)} (${best.book})</button>` : ''}
+        ${bookMarket && Math.abs(bookMarket.line - line) > 0.001 ? `<button type="button" class="line-reset" data-team-line-reset>linha 99play ${fmt(bookMarket.line, 1)}</button>` : ''}
+        ${br365Market && Math.abs(br365Market.line - line) > 0.001 ? `<button type="button" class="line-reset" data-team-line-reset-br365>linha br365 ${fmt(br365Market.line, 1)}</button>` : ''}
         <span class="line-avg">média ${avg != null ? fmt(avg, 1) : '—'}</span>
       </div>
 
@@ -2838,9 +2912,10 @@ function renderTeamAnalysis(data) {
           <span>${series.length} jogos · ${values.filter((v) => v > line).length} acima da linha</span>
         </div>
       `}
-      ${market.key === 'reb' ? `<div class="market-note">A 99play não abre mercado de rebotes por time — a linha é manual, mas o histórico é o oficial da ESPN.</div>` : ''}
+      ${market.key === 'reb' ? `<div class="market-note">Nenhuma das casas abre mercado de rebotes por time — a linha é manual, mas o histórico é o oficial da ESPN.</div>` : ''}
       <div class="market-foot">
         <a class="book-link" href="https://99play.io/sports#/sport/67" target="_blank" rel="noopener">Conferir odds na 99play ↗</a>
+        ${br365Market ? `<a class="book-link" href="https://www.br365.io/sports#/basketball" target="_blank" rel="noopener">Conferir odds na br365 ↗</a>` : ''}
         <span class="hint">Análise gratuita · sem assinatura</span>
       </div>
     </div>`;
@@ -2921,15 +2996,14 @@ function bindTeamAnalysis() {
     const bestBtn = event.target.closest('#team-analysis [data-team-line-best]');
     if (bestBtn && state.teamData) {
       const market = TEAM_MARKET_LIST.find((m) => m.key === teamAnalysisState.market) || TEAM_MARKET_LIST[0];
-      const book = teamAnalysisState.book?.teamId === String(state.teamData.team.id) ? teamAnalysisState.book : null;
-      const bookMarket = book?.props?.[market.key];
+      const books = teamAnalysisState.books[String(state.teamData.team.id)] || {};
       const log = teamAnalysisState.log?.teamId === String(state.teamData.team.id) ? teamAnalysisState.log.games : null;
       const base = log?.length ? log : state.teamData.games;
       const values = [...base].reverse()
         .map((game) => teamMarketValue(market.key, game.stats))
         .filter((v) => Number.isFinite(v))
         .reverse();
-      const best = bestTeamEntry(bookMarket?.lines, values);
+      const best = bestTeamEntryAcrossBooks(books, String(state.teamData.team.id), state.teamData.team.abbr, market.key, values);
       if (best) {
         teamAnalysisState.lines.set(`${state.teamData.team.id}:${market.key}`, best.line);
         renderTeamAnalysis(state.teamData);
@@ -2937,10 +3011,25 @@ function bindTeamAnalysis() {
       return;
     }
 
-    if (event.target.closest('#team-analysis [data-team-line-reset]') && state.teamData) {
+    const resetBtn = event.target.closest('#team-analysis [data-team-line-reset]');
+    if (resetBtn && state.teamData) {
       const market = TEAM_MARKET_LIST.find((m) => m.key === teamAnalysisState.market) || TEAM_MARKET_LIST[0];
       teamAnalysisState.lines.delete(`${state.teamData.team.id}:${market.key}`);
       renderTeamAnalysis(state.teamData);
+      return;
+    }
+
+    const resetBr365Btn = event.target.closest('#team-analysis [data-team-line-reset-br365]');
+    if (resetBr365Btn && state.teamData) {
+      const market = TEAM_MARKET_LIST.find((m) => m.key === teamAnalysisState.market) || TEAM_MARKET_LIST[0];
+      const books = teamAnalysisState.books[String(state.teamData.team.id)] || {};
+      const br365 = books['br365'];
+      const line = br365?.props?.[state.teamData.team.abbr]?.[market.key]?.line;
+      if (line != null) {
+        teamAnalysisState.lines.set(`${state.teamData.team.id}:${market.key}`, line);
+        renderTeamAnalysis(state.teamData);
+      }
+      return;
     }
   });
 }
@@ -3016,7 +3105,7 @@ async function loadTeamPropsOfDay() {
         .map((entry) => teamMarketValue(market.key, entry.stats))
         .filter((v) => Number.isFinite(v));
       if (series.length < 4) continue;
-      const entry = bestTeamEntry(book.lines, series);
+      const entry = bestTeamEntry(book, series);
       if (!entry) continue;
       const probability = Math.round(entry.p * 100);
       if (probability < 52) continue;

@@ -844,6 +844,15 @@
     base: 'https://sb2frontend-altenar2.biahosted.com/api/widget',
     params: 'culture=pt-BR&timezoneOffset=180&integration=24games1&deviceType=1&numFormat=pt-BR&countryCode=BR',
     relay: 'https://r.jina.ai/',
+    label: '99play',
+  };
+
+  // Segunda casa para comparação de odds: br365.io (API invisiblesport, protegida — tentativa via relay jina.ai).
+  // Mesmo que a API esteja bloqueada hoje, a estrutura fica pronta para quando abrir.
+  const BR365 = {
+    base: 'https://api.invisiblesport.com',
+    relay: 'https://r.jina.ai/https://api.invisiblesport.com',
+    label: 'br365',
   };
 
   // A Altenar bloqueia chamadas diretas de outras origens (Cloudflare).
@@ -867,6 +876,35 @@
       }
       throw lastError;
     });
+  }
+
+  // Tenta buscar os detalhes do evento na br365 via relay. A API é protegida;
+  // se falhar, retorna null e o app segue com apenas a 99play.
+  async function fetchBr365Event(eventId) {
+    const candidates = [
+      `/v1/events/${eventId}`,
+      `/api/v1/events/${eventId}`,
+      `/events/${eventId}`,
+      `/api/events/${eventId}`,
+    ];
+    let lastError;
+    for (const path of candidates) {
+      try {
+        const url = `${BR365.relay}${path}`;
+        const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+        if (!res.ok) { lastError = `HTTP ${res.status}`; continue; }
+        const text = await res.text();
+        const start = text.search(/[[{]/);
+        if (start < 0) { lastError = 'Resposta inválida'; continue; }
+        const json = JSON.parse(text.slice(start));
+        if (json && (json.event || json.markets || json.odds || json.data)) return json;
+      } catch (err) {
+        lastError = String(err);
+      }
+    }
+    // eslint-disable-next-line no-console
+    console.debug(`br365 event ${eventId} indisponível: ${lastError}`);
+    return null;
   }
 
   // Somente mercados "Mais/Menos" com linha única (as famílias 186xx são
@@ -964,6 +1002,83 @@
       }
     }
     return out;
+  }
+
+  // Parser genérico para teamProps da br365 (formato da API invisíveisport desconhecido).
+  // Tenta extrair mercados de time (pontos, rebotes, assistências, cestas de 3, roubos, tocos)
+  // de qualquer estrutura JSON que a API devolver. Retorna null se não conseguir interpretar.
+  function parseBr365TeamProps(json, teams) {
+    try {
+      const out = {};
+      const markets = json.markets || json.event?.markets || json.data?.markets || [];
+      const allTeams = json.competitors || json.event?.competitors || json.data?.competitors || teams || [];
+      const teamByAbbr = new Map(allTeams.map((t) => [String(t.abbreviation || t.abbr || '').toUpperCase(), t]));
+      const teamByName = new Map(allTeams.map((t) => [String(t.name || t.displayName || '').toUpperCase(), t]));
+
+      // Mapeia nomes de mercado da br365 para nossas chaves (chutes baseados em português)
+      const marketKeyByName = {
+        pontos: 'pts', 'total de pontos': 'pts', 'pontos totais': 'pts',
+        rebotes: 'reb', 'total de rebotes': 'reb',
+        assistências: 'ast', 'total de assistências': 'ast', 'assistencias': 'ast',
+        'cestas de 3': 'tpm', 'cestas de três': 'tpm', '3pt': 'tpm', 'arremessos de três pontos': 'tpm',
+        roubos: 'stl', 'total de roubos': 'stl',
+        tocos: 'blk', 'bloqueios': 'blk', 'total de tocos': 'blk', 'total de bloqueios': 'blk',
+      };
+
+      const oddsById = new Map((json.odds || json.event?.odds || json.data?.odds || []).map((o) => [String(o.id), o]));
+
+      for (const market of markets) {
+        const mName = normText(market.name || '');
+        let key = null;
+        for (const [pattern, k] of Object.entries(marketKeyByName)) {
+          if (mName.includes(pattern)) { key = k; break; }
+        }
+        if (!key) continue;
+
+        const teamName = normText(market.name || '');
+        const team = allTeams.find((t) => {
+          const full = normText(t.name || t.displayName || '');
+          return teamName.includes(full) || full.includes(teamName);
+        }) || null;
+        if (!team) continue;
+
+        const ladder = new Map();
+        const groups = market.desktopOddIds || market.mobileOddIds || market.oddIds || [];
+        for (const group of groups) {
+          for (const oddId of group || []) {
+            const odd = oddsById.get(String(oddId));
+            if (!odd) continue;
+            const oddName = String(odd.name || '');
+            const match = /(over|mais|mais de|under|menos|menos de)\s*([\d.,]+)/i.exec(oddName);
+            if (!match) continue;
+            const raw = match[2];
+            const line = Number(raw.includes(',') ? raw.replace(/\./g, '').replace(',', '.') : raw);
+            if (!Number.isFinite(line)) continue;
+            const entry = ladder.get(line) || { line };
+            const isOver = /(over|mais)/i.test(match[1]);
+            if (isOver) entry.over = odd.price ?? odd.odd ?? null;
+            else entry.under = odd.price ?? odd.odd ?? null;
+            ladder.set(line, entry);
+          }
+        }
+        if (!ladder.size) continue;
+
+        const lines = [...ladder.values()].sort((a, b) => a.line - b.line);
+        const chosen = lines[0];
+        out[team.abbr] = out[team.abbr] || {};
+        if (!out[team.abbr][key]) {
+          out[team.abbr][key] = {
+            line: chosen.line,
+            over: chosen.over ?? null,
+            under: chosen.under ?? null,
+            lines,
+          };
+        }
+      }
+      return Object.keys(out).length ? out : null;
+    } catch {
+      return null;
+    }
   }
 
   function parseBookEvent(json) {
@@ -1158,6 +1273,23 @@
     const bookMatch = pathname.match(/^\/api\/book\/event\/(\d+)$/);
     if (bookMatch) {
       return getBookEvent(bookMatch[1]);
+    }
+
+    const br365Match = pathname.match(/^\/api\/book-br365\/event\/(\d+)$/);
+    if (br365Match) {
+      const json = await fetchBr365Event(br365Match[1]);
+      if (!json) throw new Error('br365 indisponível');
+      return {
+        id: String(json.id || json.event?.id || br365Match[1]),
+        name: json.name || json.event?.name || '',
+        startDate: json.startDate || json.event?.startDate || '',
+        teams: (json.competitors || json.event?.competitors || []).map((c) => ({
+          id: String(c.id || c.team?.id),
+          abbr: c.abbreviation || c.team?.abbreviation || '',
+          name: c.name || c.team?.name || c.team?.displayName || '',
+        })),
+        teamProps: parseBr365TeamProps(json, json.competitors || json.event?.competitors || []),
+      };
     }
 
     const teamLogMatch = pathname.match(/^\/api\/team-log\/(\d+)$/);
