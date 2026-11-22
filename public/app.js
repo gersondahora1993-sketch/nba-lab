@@ -57,6 +57,9 @@ const PAGE_META = {
   players: ['Jogadores', 'Análise de mercados com linha, odd da 99play e aproveitamento L5/L10/L20.'],
   combos: ['Combos', 'Média, mediana e aproveitamento contra a linha de over/under.'],
   compare: ['Comparador', 'Dois jogadores lado a lado, com perfil e produção.'],
+  'football-overview': ['Futebol — Visão geral', 'Jogos do dia, melhores entradas e estatísticas de futebol.'],
+  'football-teams': ['Times — Futebol', 'Gols, escanteios, cartões, chutes e odds por mercado.'],
+  'football-players': ['Jogadores — Futebol', 'Gols, assistências, finalizações, desarmes e defesas.'],
 };
 
 const state = {
@@ -87,6 +90,21 @@ const state = {
   insightsToken: 0,
   leaders: [],
   leadersPromise: null,
+
+  // Futebol
+  football: {
+    competitions: [],
+    competitionId: null,
+    slate: [],
+    slateDate: '',
+    teamId: null,
+    teamLast: 5,
+    teamData: null,
+    playerId: null,
+    playerLast: 5,
+    playerData: null,
+    bestBets: [],
+  },
 };
 
 let teamToken = 0;
@@ -94,7 +112,10 @@ let compareTeamToken = 0;
 let playerToken = 0;
 let comboToken = 0;
 let compareToken = 0;
-let pluginSeq = 0;
+let footballToken = 0;
+let footballTeamToken = 0;
+let footballPlayerToken = 0;
+const pluginSeq = 0;
 const charts = new Map();
 const seriesPromises = new Map();
 
@@ -428,6 +449,9 @@ function goTo(view) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
   if (view === 'overview' && !state.slateLoaded) loadSlate();
   if (view === 'combos' && !state.comboData) ensureCombo();
+  if (view === 'football-overview' && !state.football.slateDate) loadFootballOverview();
+  if (view === 'football-teams' && !state.football.teamData) loadFootballTeam();
+  if (view === 'football-players' && !state.football.playerData) loadFootballPlayer();
 }
 
 function bindNavigation() {
@@ -3206,10 +3230,543 @@ async function loadTeamPropsOfDay() {
   list.dataset.ready = '1';
 }
 
+/* ============================================================================
+   GS Status Football — módulo de futebol
+   ============================================================================ */
+
+const FOOTBALL_MARKETS = [
+  { key: 'goals', label: 'Gols do time', icon: '⚽' },
+  { key: 'goalsHT', label: 'Gols 1º tempo', icon: '🔥' },
+  { key: 'corners', label: 'Escanteios', icon: '📐' },
+  { key: 'cards', label: 'Cartões amarelos', icon: '🟨' },
+  { key: 'shots', label: 'Chutes totais', icon: '🎯' },
+  { key: 'shotsOnTarget', label: 'Chutes a gol', icon: '🥅' },
+];
+
+const footballOddColor = (p) => {
+  if (p >= 0.70) return 'var(--green)';
+  if (p >= 0.55) return 'var(--blue)';
+  if (p >= 0.45) return 'var(--yellow)';
+  return 'var(--red)';
+};
+
+function footballProbFromRate(rate) {
+  // taxa histórica -> probabilidade ajustada (mesma lógica do NBA, suavizada)
+  if (rate == null) return null;
+  const p = Math.min(0.90, Math.max(0.10, rate));
+  return p;
+}
+
+function footballBestEntry(series, line, oddsByBook) {
+  if (!series?.length) return null;
+  const hits = series.filter((v) => v > line).length;
+  const p = hits / series.length;
+  let bestBook = null;
+  let bestOdd = null;
+  for (const [book, odd] of Object.entries(oddsByBook || {})) {
+    if (odd && (bestOdd == null || odd > bestOdd)) {
+      bestOdd = odd;
+      bestBook = book;
+    }
+  }
+  return { line, p, hits, total: series.length, odd: bestOdd, book: bestBook };
+}
+
+async function loadFootballOverview() {
+  const token = ++footballToken;
+  const section = $('#football-slate');
+  const grid = $('#football-slate-grid');
+  const bestSection = $('#football-best-bets');
+  const bestList = $('#football-best-list');
+  if (!section || !grid) return;
+
+  section.hidden = false;
+  grid.innerHTML = '<div class="skeleton-card"></div><div class="skeleton-card"></div><div class="skeleton-card"></div>';
+
+  try {
+    const data = await getFootballSlate();
+    if (token !== footballToken) return;
+    state.football.slate = data.games || [];
+    state.football.slateDate = new Date().toISOString().slice(0, 10);
+
+    const updated = $('#football-slate-updated');
+    if (updated) updated.textContent = `Atualizado ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+
+    renderFootballSlate(state.football.slate);
+
+    // Calcula melhores entradas do dia (apenas jogos com odds)
+    const bestBets = [];
+    for (const game of state.football.slate) {
+      if (!game.odds) continue;
+      const home = game.homeTeam;
+      const away = game.awayTeam;
+      if (!home || !away) continue;
+      const line = game.odds.total;
+      if (!line) continue;
+      // Usamos média histórica simples se não tivermos série — placeholder de probabilidade
+      const p = 0.50; // sem série histórica ainda, usamos neutro
+      const bet = {
+        team: home.name,
+        market: 'Total de gols',
+        line,
+        odd: game.odds.homeMoney || game.odds.awayMoney || null,
+        probability: Math.round(p * 100),
+        book: game.odds.provider || '99play',
+        event: game,
+        betUrl: `https://99play.io/sports#/sport/1`,
+      };
+      if (bet.odd) bestBets.push(bet);
+    }
+    bestBets.sort((a, b) => (b.odd || 0) - (a.odd || 0));
+    state.football.bestBets = bestBets.slice(0, 6);
+
+    if (bestSection && bestList) {
+      if (state.football.bestBets.length) {
+        bestSection.hidden = false;
+        const hint = $('#football-best-hint');
+        if (hint) hint.textContent = `${state.football.bestBets.length} entradas · odds da casa`;
+        bestList.innerHTML = state.football.bestBets.map((b, i) => `
+          <button type="button" class="radar-item football-bet-item" data-bet-url="${escapeHtml(b.betUrl)}">
+            <span class="radar-rank">${i + 1}</span>
+            <span class="fire-badge">🔥</span>
+            <span class="radar-body">
+              <span class="radar-top">
+                <strong>${escapeHtml(b.team)}</strong>
+                <span class="radar-prob">${b.probability}%</span>
+              </span>
+              <span class="radar-bet">Over ${fmt(b.line, 1)} ${escapeHtml(b.market)}</span>
+              <span class="radar-meta">
+                <span class="radar-odd on">${b.odd ? fmt(b.odd, 2) : '—'}</span>
+                <span class="radar-book">${escapeHtml(b.book)}</span>
+              </span>
+            </span>
+          </button>
+        `).join('');
+      } else {
+        bestSection.hidden = true;
+      }
+    }
+  } catch (err) {
+    console.error('football overview error', err);
+    grid.innerHTML = '<div class="loading">Não foi possível carregar os jogos de futebol.</div>';
+  }
+}
+
+function renderFootballSlate(games) {
+  const grid = $('#football-slate-grid');
+  if (!grid) return;
+  if (!games?.length) {
+    grid.innerHTML = '<div class="loading">Sem jogos de futebol hoje.</div>';
+    return;
+  }
+  grid.innerHTML = games.map((g) => {
+    const h = g.homeTeam;
+    const a = g.awayTeam;
+    const completed = g.status.completed;
+    const score = completed ? `${h.score || 0} x ${a.score || 0}` : '—';
+    const clock = g.status.clock ? ` ${g.status.clock}` : '';
+    const odd = g.odds ? (g.odds.homeMoney || g.odds.awayMoney || '—') : '—';
+    return `
+    <button type="button" class="slate-card football-game-card" data-event-id="${escapeHtml(g.id)}">
+      <div class="slate-head">
+        <span class="slate-time">${new Date(g.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+        <span class="slate-comp">${escapeHtml(g.competition)}</span>
+      </div>
+      <div class="slate-teams">
+        <div class="slate-team home">
+          <img src="${escapeHtml(h.logo || '')}" class="slate-logo" alt="" onerror="this.style.opacity='.15'" />
+          <span class="slate-name">${escapeHtml(h.name)}</span>
+          <span class="slate-score ${completed ? 'final' : ''}">${score}</span>
+        </div>
+        <div class="slate-vs">x</div>
+        <div class="slate-team away">
+          <img src="${escapeHtml(a.logo || '')}" class="slate-logo" alt="" onerror="this.style.opacity='.15'" />
+          <span class="slate-name">${escapeHtml(a.name)}</span>
+          <span class="slate-score ${completed ? 'final' : ''}">${score}</span>
+        </div>
+      </div>
+      <div class="slate-foot">
+        <span class="slate-status">${completed ? 'Final' : g.status.detail || 'Ao vivo'}</span>
+        <span class="slate-odd">Odd ${odd}</span>
+      </div>
+    </button>
+    `;
+  }).join('');
+}
+
+async function loadFootballTeam() {
+  const token = ++footballTeamToken;
+  const select = $('#football-team-select');
+  const header = $('#football-team-header');
+  const kpis = $('#football-team-kpis');
+  const analysis = $('#football-team-analysis');
+  if (!select || !header || !analysis) return;
+
+  const teamId = select.value;
+  if (!teamId) {
+    header.innerHTML = '<div class="loading">Selecione um time</div>';
+    return;
+  }
+  header.innerHTML = '<div class="loading"><span class="spinner"></span>Carregando time…</div>';
+  analysis.innerHTML = '';
+
+  try {
+    const data = await getFootballTeam(teamId, state.football.competitionId);
+    if (token !== footballTeamToken) return;
+    state.football.teamData = data;
+    renderFootballTeam(data);
+  } catch (err) {
+    console.error('football team error', err);
+    header.innerHTML = '<div class="loading">Erro ao carregar o time.</div>';
+  }
+}
+
+function renderFootballTeam(data) {
+  const { team: teamInfo, games } = data;
+  const header = $('#football-team-header');
+  const kpis = $('#football-team-kpis');
+  const analysis = $('#football-team-analysis');
+  if (!header || !analysis) return;
+
+  const played = games.filter((g) => g.status === 'completed');
+  const lastN = played.slice(0, state.football.teamLast);
+  const avgGF = lastN.length ? (lastN.reduce((a, g) => a + (g.home ? g.scoreFor : g.scoreAgainst), 0) / lastN.length).toFixed(1) : '—';
+  const avgGA = lastN.length ? (lastN.reduce((a, g) => a + (g.home ? g.scoreAgainst : g.scoreFor), 0) / lastN.length).toFixed(1) : '—';
+  const wins = lastN.filter((g) => (g.home ? g.scoreFor > g.scoreAgainst : g.scoreAgainst > g.scoreFor)).length;
+  const winRate = lastN.length ? ((wins / lastN.length) * 100).toFixed(0) : '—';
+
+  header.innerHTML = `
+    <div class="entity-head">
+      <img class="entity-logo" src="${escapeHtml(teamInfo.logo || '')}" alt="" onerror="this.style.opacity='.15'" />
+      <div>
+        <div class="entity-name">${escapeHtml(teamInfo.name || 'Time')} <span class="badge blue">${played.length} jogos</span></div>
+        <div class="entity-sub">
+          <span>GF/jogo: ${avgGF}</span>
+          <span>·</span><span>GC/jogo: ${avgGA}</span>
+          <span>·</span><span>Aproveitamento: ${winRate}%</span>
+        </div>
+      </div>
+      <div class="entity-form">${played.slice(0, 5).map((g) => g.win ? '<span class="form-dot w">V</span>' : '<span class="form-dot l">D</span>').join('')}</div>
+    </div>
+  `;
+
+  kpis.innerHTML = `
+    <div class="kpi"><div class="kpi-label">Gols pró / jogo</div><div class="kpi-value">${avgGF}</div></div>
+    <div class="kpi"><div class="kpi-label">Gols contra / jogo</div><div class="kpi-value">${avgGA}</div></div>
+    <div class="kpi"><div class="kpi-label">Aproveitamento</div><div class="kpi-value">${winRate}%</div></div>
+    <div class="kpi"><div class="kpi-label">Jogos analisados</div><div class="kpi-value">${played.length}</div></div>
+  `;
+
+  renderFootballTeamMarkets(lastN);
+  renderFootballTeamTable(games);
+}
+
+function renderFootballTeamMarkets(games) {
+  const analysis = $('#football-team-analysis');
+  if (!analysis) return;
+
+  // Calcula médias por mercado
+  const marketStats = {};
+  for (const m of FOOTBALL_MARKETS) {
+    const values = games.map((g) => {
+      const s = g.stats || {};
+      switch (m.key) {
+        case 'goals': return s.goals || 0;
+        case 'goalsHT': return Math.floor((s.goals || 0) / 2); // estimativa HT
+        case 'corners': return s.corners || 0;
+        case 'cards': return s.fouls || 0; // placeholder: cartões não disponíveis no scoreboard
+        case 'shots': return s.shots || 0;
+        case 'shotsOnTarget': return s.shotsOnTarget || 0;
+        default: return 0;
+      }
+    }).filter((v) => Number.isFinite(v));
+    marketStats[m.key] = values;
+  }
+
+  const marketCards = FOOTBALL_MARKETS.map((m) => {
+    const values = marketStats[m.key] || [];
+    const avg = values.length ? (values.reduce((a, b) => a + b, 0) / values.length).toFixed(1) : '—';
+    const line = values.length ? Math.round(values.reduce((a, b) => a + b, 0) / values.length * 2) / 2 : 0.5;
+    const hits = values.filter((v) => v > line).length;
+    const pct = values.length ? Math.round((hits / values.length) * 100) : 0;
+    const isHot = pct >= 65;
+    return `
+    <div class="football-market-card ${isHot ? 'hot' : ''}">
+      <div class="fm-head">
+        <span class="fm-icon">${m.icon}</span>
+        <span class="fm-label">${m.label}</span>
+        ${isHot ? '<span class="fm-fire">🔥</span>' : ''}
+      </div>
+      <div class="fm-line">Linha ${fmt(line, 1)} · Média ${avg}</div>
+      <div class="fm-stats">${hits}/${values.length} acima (${pct}%)</div>
+      <div class="fm-odd">
+        <a href="https://99play.io/sports#/sport/1" target="_blank" rel="noopener" class="odd-link">99play Odd —</a>
+        <a href="https://www.br365.io/sports#/soccer" target="_blank" rel="noopener" class="odd-link">br365 Odd —</a>
+      </div>
+    </div>
+    `;
+  }).join('');
+
+  analysis.innerHTML = `
+    <div class="section-head">
+      <h3>Mercados de entrada — ${escapeHtml((state.football.teamData && state.football.teamData.team) ? state.football.teamData.team.name : 'Time')}</h3>
+      <span class="hint">Probabilidade baseada nos últimos ${games.length} jogos · clique na odd para apostar</span>
+    </div>
+    <div class="grid two">${marketCards}</div>
+  `;
+}
+
+function renderFootballTeamTable(games) {
+  const wrap = $('#football-team-games-table');
+  if (!wrap) return;
+  const recent = games.slice(0, 10);
+  wrap.innerHTML = `
+    <table class="data-table">
+      <thead><tr><th>Data</th><th>Competição</th><th>Adversário</th><th>Placar</th><th>Gols</th><th>Esc.</th><th>Cartões</th><th>Chutes</th></tr></thead>
+      <tbody>
+        ${recent.map((g) => {
+          const s = g.stats || {};
+          const isHome = g.home;
+          const gf = isHome ? g.scoreFor : g.scoreAgainst;
+          const gc = isHome ? g.scoreAgainst : g.scoreFor;
+          return `<tr>
+            <td>${new Date(g.date).toLocaleDateString('pt-BR')}</td>
+            <td>${escapeHtml(g.competition)}</td>
+            <td>${escapeHtml(g.opp?.name || '—')}</td>
+            <td><strong>${gf} x ${gc}</strong></td>
+            <td>${s.goals || '—'}</td>
+            <td>${s.corners || '—'}</td>
+            <td>${s.fouls || '—'}</td>
+            <td>${s.shots || '—'}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+async function loadFootballPlayer() {
+  const token = ++footballPlayerToken;
+  const picker = $('#football-player-picker');
+  const header = $('#football-player-header');
+  const analysis = $('#football-player-analysis');
+  if (!picker || !header || !analysis) return;
+
+  const input = picker.querySelector('input');
+  const name = input ? input.value.trim() : '';
+  if (!name) {
+    header.innerHTML = '<div class="loading">Digite o nome de um jogador</div>';
+    return;
+  }
+  header.innerHTML = '<div class="loading"><span class="spinner"></span>Buscando jogador…</div>';
+  analysis.innerHTML = '';
+
+  try {
+    // Busca no índice de jogadores da NBA (não temos índice de futebol ainda)
+    // Como placeholder, mostramos que o módulo de jogadores está em construção
+    header.innerHTML = `
+      <div class="entity-head">
+        <div>
+          <div class="entity-name">${escapeHtml(name)}</div>
+          <div class="entity-sub">Módulo de jogadores em construção · use a análise de times acima</div>
+        </div>
+      </div>
+    `;
+    analysis.innerHTML = `
+      <div class="loading">
+        <p>A análise detalhada de jogadores de futebol estará disponível em breve.</p>
+        <p>Enquanto isso, acesse a aba <strong>Times</strong> para ver os mercados de entrada por time.</p>
+      </div>
+    `;
+  } catch (err) {
+    console.error('football player error', err);
+    header.innerHTML = '<div class="loading">Erro ao buscar jogador.</div>';
+  }
+}
+
+/* ------------------------------------- navegação futebol ------------------------------------- */
+
+function bindFootballNavigation() {
+  // Competições
+  const compSelect = $('#football-comp-select');
+  const teamSelect = $('#football-team-select');
+  if (compSelect && teamSelect) {
+    compSelect.addEventListener('change', async () => {
+      const compId = compSelect.value;
+      state.football.competitionId = compId;
+      state.football.teamData = null;
+      teamSelect.innerHTML = '<option value="">Carregando times…</option>';
+      try {
+        // Busca times da competição via scoreboard (usa times dos jogos)
+        const data = await getFootballSlate(compId);
+        const teamsMap = new Map();
+        for (const g of data.games || []) {
+          if (g.homeTeam) teamsMap.set(g.homeTeam.id, g.homeTeam);
+          if (g.awayTeam) teamsMap.set(g.awayTeam.id, g.awayTeam);
+        }
+        teamSelect.innerHTML = '<option value="">Selecione um time</option>' + [...teamsMap.values()].map((t) =>
+          `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name)}</option>`
+        ).join('');
+      } catch {
+        teamSelect.innerHTML = '<option value="">Erro ao carregar times</option>';
+      }
+    });
+
+    teamSelect.addEventListener('change', () => {
+      state.football.teamId = teamSelect.value;
+      state.football.teamData = null;
+      goTo('football-teams');
+    });
+  }
+
+  // Slate cards -> abre time
+  document.addEventListener('click', (event) => {
+    const card = event.target.closest('.football-game-card');
+    if (card) {
+      const eventId = card.dataset.eventId;
+      const game = state.football.slate.find((g) => g.id === eventId);
+      if (game) {
+        // Abre o time da casa por padrão
+        goTo('football-teams');
+        setTimeout(() => {
+          const compSelect = $('#football-comp-select');
+          const teamSelect = $('#football-team-select');
+          if (compSelect) compSelect.value = game.competitionId || '';
+          if (teamSelect) {
+            teamSelect.value = game.homeTeam?.id || '';
+            teamSelect.dispatchEvent(new Event('change'));
+          }
+        }, 100);
+      }
+    }
+
+    // Melhor entrada -> link direto
+    const betItem = event.target.closest('.football-bet-item');
+    if (betItem) {
+      const url = betItem.dataset.betUrl;
+      if (url) window.open(url, '_blank');
+    }
+  });
+}
+
+/* ------------------------------------- charts futebol ------------------------------------- */
+
+function renderFootballTeamCharts(games) {
+  // Gols por jogo
+  const goalsCtx = $('#chart-football-team-goals');
+  if (goalsCtx && games.length) {
+    const labels = games.map((g) => new Date(g.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }));
+    const homeGoals = games.map((g) => g.home ? g.scoreFor : g.scoreAgainst);
+    makeChart('chart-football-team-goals', {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Gols pró',
+          data: homeGoals,
+          backgroundColor: homeGoals.map((v) => (v >= 2 ? 'var(--green)' : 'var(--red)')),
+          borderRadius: 4,
+        }],
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } },
+    });
+  }
+
+  // Escanteios
+  const cornersCtx = $('#chart-football-team-corners');
+  if (cornersCtx && games.length) {
+    const labels = games.map((g) => new Date(g.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }));
+    const corners = games.map((g) => (g.stats && g.stats.corners) || 0);
+    makeChart('chart-football-team-corners', {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Escanteios',
+          data: corners,
+          backgroundColor: 'var(--blue)',
+          borderRadius: 4,
+        }],
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } },
+    });
+  }
+
+  // Cartões
+  const cardsCtx = $('#chart-football-team-cards');
+  if (cardsCtx && games.length) {
+    const labels = games.map((g) => new Date(g.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }));
+    const cards = games.map((g) => (g.stats && g.stats.fouls) || 0);
+    makeChart('chart-football-team-cards', {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Cartões / Faltas',
+          data: cards,
+          backgroundColor: 'var(--orange)',
+          borderRadius: 4,
+        }],
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } },
+    });
+  }
+
+  // Chutes
+  const shotsCtx = $('#chart-football-team-shots');
+  if (shotsCtx && games.length) {
+    const labels = games.map((g) => new Date(g.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }));
+    const shots = games.map((g) => (g.stats && g.stats.shots) || 0);
+    makeChart('chart-football-team-shots', {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Chutes',
+          data: shots,
+          backgroundColor: 'var(--violet)',
+          borderRadius: 4,
+        }],
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } },
+    });
+  }
+}
+
+// Integra renderFootballTeam com charts
+const _renderFootballTeam = renderFootballTeam;
+renderFootballTeam = function (data) {
+  _renderFootballTeam.call(this, data);
+  if (data && data.games) renderFootballTeamCharts(data.games);
+};
+
+/* ------------------------------------- init futebol ------------------------------------- */
+
+async function initFootball() {
+  try {
+    const data = await getFootballCompetitions();
+    state.football.competitions = data.competitions || [];
+    const compSelect = $('#football-comp-select');
+    if (compSelect) {
+      compSelect.innerHTML = state.football.competitions.map((c) =>
+        `<option value="${escapeHtml(c.id)}">${c.flag} ${escapeHtml(c.name)}</option>`
+      ).join('');
+      // Seleciona Brasileirão por padrão
+      const br = state.football.competitions.find((c) => c.key === 'BR');
+      if (br) compSelect.value = br.id;
+      compSelect.dispatchEvent(new Event('change'));
+    }
+  } catch (err) {
+    console.error('football init error', err);
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   bindAnalysis();
   bindTeamAnalysis();
+  bindFootballNavigation();
   init();
+  initFootball();
   if ('serviceWorker' in navigator && /^https?:$/.test(window.location.protocol)) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }

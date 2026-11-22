@@ -21,6 +21,54 @@ const ESPN = 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba';
 const ESPN_WEB = 'https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba';
 const ESPN_CORE = 'https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba';
 
+// ============================================================================
+// GS Status Football — ESPN Soccer (futebol) endpoints
+// ============================================================================
+const ESPN_FOOTBALL_SITE = 'https://site.api.espn.com/apis/site/v2/sports/soccer';
+const ESPN_FOOTBALL_CORE = 'https://sports.core.api.espn.com/v2/sports/soccer';
+// Competições globais disponíveis na ESPN Soccer (IDs conhecidos)
+const FOOTBALL_COMPETITIONS = {
+  'BR': { id: 'bra.1', name: 'Campeonato Brasileiro Série A', country: 'Brasil', flag: '🇧🇷' },
+  'ENG': { id: 'eng.1', name: 'Premier League', country: 'Inglaterra', flag: '🇬🇧' },
+  'ESP': { id: 'esp.1', name: 'La Liga', country: 'Espanha', flag: '🇪🇸' },
+  'ITA': { id: 'ita.1', name: 'Serie A', country: 'Itália', flag: '🇮🇹' },
+  'GER': { id: 'ger.1', name: 'Bundesliga', country: 'Alemanha', flag: '🇩🇪' },
+  'FRA': { id: 'fra.1', name: 'Ligue 1', country: 'França', flag: '🇫🇷' },
+  'USA': { id: 'usa.1', name: 'MLS', country: 'Estados Unidos', flag: '🇺🇸' },
+  'INTL': { id: 'intl.1', name: 'Competições Internacionais', country: 'Mundo', flag: '🌍' },
+};
+
+// Converte data YYYYMMDD para uso no scoreboard da ESPN
+function espnDateStr(d = new Date()) {
+  return d.toISOString().slice(0, 10).replace(/-/g, '');
+}
+
+// Extrai estatísticas de time de um objeto de estatísticas da ESPN Soccer
+function soccerTeamStatsFromMap(map) {
+  const g = (n) => Number(map[n]) || 0;
+  return {
+    apps: g('appearances'),
+    goals: g('totalGoals'),
+    assists: g('goalAssists'),
+    shots: g('totalShots'),
+    shotsOnTarget: g('shotsOnTarget'),
+    shotAssists: g('shotAssists'),
+    possession: g('possessionPct'),
+    fouls: g('foulsCommitted'),
+    corners: g('wonCorners'),
+    saves: g('saves') || 0,
+    yellowCards: g('yellowCards') || 0,
+  };
+}
+
+function soccerStatsArrayToMap(statsArray) {
+  const map = {};
+  for (const s of statsArray || []) {
+    map[s.name] = Number(s.displayValue) || 0;
+  }
+  return map;
+}
+
 // ---------------------------------------------------------------- utilities
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -697,6 +745,236 @@ async function getPlayerDashboard(playerId, last = 10) {
   };
 }
 
+// ============================================================================
+// GS Status Football — camada de dados (ESPN Soccer)
+// ============================================================================
+
+async function football(url, ttlSeconds = 900, key = url) {
+  return cached(`football:${key}`, ttlSeconds * 1000, async () => {
+    let lastError;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const res = await fetch(url, {
+          headers: {
+            'user-agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+            accept: 'application/json, text/plain, */*',
+          },
+          signal: AbortSignal.timeout(25000),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status} em ${url}`);
+        return await res.json();
+      } catch (err) {
+        lastError = err;
+        if (attempt < 2) await sleep(350 * (attempt + 1));
+      }
+    }
+    throw lastError;
+  });
+}
+
+function footballCompetitorFromScoreboard(c) {
+  const team = c.team || {};
+  const stats = soccerStatsArrayToMap(c.statistics);
+  return {
+    id: String(c.id || team.id || ''),
+    homeAway: c.homeAway || '',
+    name: team.displayName || team.name || '',
+    abbr: team.abbreviation || '',
+    shortName: team.shortDisplayName || '',
+    logo: team.logo || '',
+    score: Number(c.score) || 0,
+    winner: Boolean(c.winner),
+    form: c.form || '',
+    stats: soccerTeamStatsFromMap(stats),
+  };
+}
+
+async function getFootballCompetitions() {
+  return cached('football:competitions:v1', 12 * 3600 * 1000, async () => {
+    const out = [];
+    for (const [key, comp] of Object.entries(FOOTBALL_COMPETITIONS)) {
+      try {
+        const json = await football(`${ESPN_FOOTBALL_SITE}/${comp.id}`, 12 * 3600, `football:comp:${comp.id}`);
+        const season = json?.season || json?.seasons?.[0] || {};
+        out.push({
+          key,
+          id: comp.id,
+          name: comp.name,
+          country: comp.country,
+          flag: comp.flag,
+          seasonYear: season.year || 2026,
+          seasonType: season.displayName || 'Temporada',
+          hasEvents: Boolean(json?.events?.length),
+        });
+      } catch {
+        out.push({ key, id: comp.id, name: comp.name, country: comp.country, flag: comp.flag, seasonYear: 2026, seasonType: 'Temporada', hasEvents: false });
+      }
+    }
+    return out;
+  });
+}
+
+async function getFootballSlate(competitionKey = null, dateStr = null) {
+  const date = dateStr || espnDateStr();
+  const comps = competitionKey ? [FOOTBALL_COMPETITIONS[competitionKey]] : Object.values(FOOTBALL_COMPETITIONS);
+  const results = [];
+  for (const comp of comps) {
+    try {
+      const json = await football(`${ESPN_FOOTBALL_SITE}/${comp.id}/scoreboard?dates=${date}`, 90, `football:slate:${comp.id}:${date}`);
+      const league = json?.leagues?.[0] || {};
+      const compName = league.name || comp.name;
+      const season = league.season || {};
+      const events = json?.events || [];
+      for (const event of events) {
+        const compData = event.competitions?.[0];
+        if (!compData) continue;
+        const competitors = (compData.competitors || []).map((c) => footballCompetitorFromScoreboard(c));
+        const home = competitors.find((c) => c.homeAway === 'home');
+        const away = competitors.find((c) => c.homeAway === 'away');
+        const odds = compData?.odds?.[0];
+        results.push({
+          id: String(event.id),
+          name: event.name,
+          date: event.date,
+          competition: compName,
+          competitionKey: comp.key,
+          competitionId: comp.id,
+          seasonYear: season.year || 2026,
+          venue: compData?.venue?.fullName || '',
+          status: {
+            state: compData?.status?.type?.state || 'pre',
+            detail: compData?.status?.type?.shortDetail || compData?.status?.type?.description || '',
+            completed: Boolean(compData?.status?.type?.completed),
+            clock: compData?.status?.displayClock || null,
+          },
+          competitors: { home, away },
+          homeTeam: home,
+          awayTeam: away,
+          odds: odds
+            ? {
+                provider: odds.provider?.name || '',
+                spread: Number.isFinite(odds.spread) ? odds.spread : null,
+                total: Number.isFinite(odds.overUnder) ? odds.overUnder : null,
+                homeMoney: odds.moneyline?.home?.close?.odds || '',
+                awayMoney: odds.moneyline?.away?.close?.odds || '',
+                drawMoney: odds.moneyline?.draw?.close?.odds || '',
+              }
+            : null,
+        });
+      }
+    } catch {
+      /* competition pode não ter dados hoje */
+    }
+  }
+  results.sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
+  return results;
+}
+
+async function getFootballTeam(teamId, competitionId) {
+  return cached(`football:team:${teamId}:${competitionId}`, 6 * 3600 * 1000, async () => {
+    // Busca jogos recentes do time consultando scoreboard de várias datas recentes
+    const games = [];
+    const dates = [];
+    const today = new Date();
+    for (let i = 0; i < 45; i += 1) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      dates.push(espnDateStr(d));
+    }
+    for (const compKey of Object.keys(FOOTBALL_COMPETITIONS)) {
+      const comp = FOOTBALL_COMPETITIONS[compKey];
+      if (competitionId && comp.id !== competitionId) continue;
+      for (const date of dates.slice(0, 15)) {
+        if (games.length >= 20) break;
+        try {
+          const json = await football(`${ESPN_FOOTBALL_SITE}/${comp.id}/scoreboard?dates=${date}`, 900, `football:teamdate:${comp.id}:${date}`);
+          for (const event of json?.events || []) {
+            const compData = event.competitions?.[0];
+            if (!compData) continue;
+            const competitors = (compData.competitors || []).map((c) => footballCompetitorFromScoreboard(c));
+            const me = competitors.find((c) => String(c.id) === String(teamId));
+            if (!me) continue;
+            const opp = competitors.find((c) => String(c.id) !== String(teamId));
+            games.push({
+              eventId: String(event.id),
+              date: event.date,
+              competition: comp.name,
+              home: me.homeAway === 'home',
+              opp: opp ? { id: opp.id, name: opp.name, abbr: opp.abbr, logo: opp.logo } : null,
+              scoreFor: me.score,
+              scoreAgainst: opp ? opp.score : 0,
+              status: compData.status.type.completed ? 'completed' : 'scheduled',
+              stats: me.stats,
+              form: me.form,
+            });
+          }
+        } catch { /* skip */ }
+        if (games.length >= 20) break;
+      }
+      if (games.length >= 20) break;
+    }
+    games.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+    return { teamId, games: games.slice(0, 20), played: games.filter((g) => g.status === 'completed').length };
+  });
+}
+
+async function getFootballPlayer(playerId) {
+  return cached(`football:player:${playerId}`, 6 * 3600 * 1000, async () => {
+    // Para jogadores de futebol, tentamos buscar via core API
+    let athlete = null;
+    try {
+      athlete = await football(`${ESPN_FOOTBALL_CORE}/seasons/2026/athletes/${playerId}`, 6 * 3600, `football:athlete:${playerId}`);
+    } catch { /* ok */ }
+    if (!athlete) {
+      return {
+        playerId: String(playerId),
+        name: `Jogador ${playerId}`,
+        shortName: '',
+        headshot: `https://a.espncdn.com/i/headshots/soccer/players/full/${playerId}.png`,
+        position: '',
+        jersey: '',
+        team: null,
+      };
+    }
+    const teamId = athlete?.team?.$ref?.match(/teams\/(\d+)/)?.[1] || null;
+    let team = null;
+    if (teamId) {
+      try {
+        // Busca o time em qualquer competição
+        for (const comp of Object.values(FOOTBALL_COMPETITIONS)) {
+          try {
+            const t = await football(`${ESPN_FOOTBALL_SITE}/${comp.id}/teams`, 6 * 3600, `football:teams:${comp.id}`);
+            const found = (t.sports?.[0]?.leagues?.[0]?.teams || []).find((tm) => String(tm.team.id) === String(teamId));
+            if (found) {
+              team = { id: String(found.team.id), name: found.team.displayName, abbr: found.team.abbreviation, logo: found.team.logo };
+              break;
+            }
+          } catch { /* try next */ }
+        }
+      } catch { /* ok */ }
+    }
+    return {
+      playerId: String(playerId),
+      name: athlete?.fullName || `Jogador ${playerId}`,
+      shortName: athlete?.shortName || '',
+      headshot: athlete?.headshot?.href || `https://a.espncdn.com/i/headshots/soccer/players/full/${playerId}.png`,
+      position: athlete?.position?.displayName || '',
+      jersey: athlete?.jersey || '',
+      team,
+    };
+  });
+}
+
+async function getFootballPlayerLog(playerId, last = 10) {
+  return cached(`football:player-log:${playerId}:${last}`, 6 * 3600 * 1000, async () => {
+    // Futebol: não há gamelog direto de jogador na ESPN pública.
+    // Retornamos jogos recentes com o jogador se disponível via estatísticas de partidas.
+    // Como fallback, retornamos estrutura vazia para o frontend preencher com dados do time.
+    return { playerId, games: [], played: 0, note: 'Estatísticas individuais por jogo via boxscore da partida' };
+  });
+}
+
 // ------------------------------------------------------------------- server
 
 function sendJSON(res, status, payload) {
@@ -794,6 +1072,40 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // ========================================================================
+    // GS Status Football — rotas da API
+    // ========================================================================
+    if (pathname === '/api/football/competitions') {
+      sendJSON(res, 200, { season: '2026', competitions: await getFootballCompetitions() });
+      return;
+    }
+
+    if (pathname === '/api/football/slate') {
+      const comp = url.searchParams.get('comp') || null;
+      sendJSON(res, 200, { season: '2026', games: await getFootballSlate(comp) });
+      return;
+    }
+
+    const ftMatch = pathname.match(/^\/api\/football\/team\/([\d]+)$/);
+    if (ftMatch) {
+      const compId = url.searchParams.get('comp') || '';
+      sendJSON(res, 200, await getFootballTeam(ftMatch[1], compId));
+      return;
+    }
+
+    const fpMatch = pathname.match(/^\/api\/football\/player\/([\d]+)$/);
+    if (fpMatch) {
+      sendJSON(res, 200, await getFootballPlayer(fpMatch[1]));
+      return;
+    }
+
+    const fplMatch = pathname.match(/^\/api\/football\/player-log\/([\d]+)$/);
+    if (fplMatch) {
+      const last = Math.min(Math.max(Number(url.searchParams.get('last') || 10), 1), 30);
+      sendJSON(res, 200, await getFootballPlayerLog(fplMatch[1], last));
+      return;
+    }
+
     if (pathname.startsWith('/api/')) {
       sendJSON(res, 404, { error: 'Endpoint não encontrado' });
       return;
@@ -815,11 +1127,12 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log('');
-  console.log('  🏀  GS Stats PRO');
+  console.log('  ⚽  GS Status Football + 🏀  GS Stats PRO');
   console.log(`  ➜  http://localhost:${PORT}`);
   console.log(`  ➜  Temporada ${SEASON_LABEL} (ESPN)`);
   console.log('');
 
   getTeams().catch(() => {});
   getPlayerIndex().catch(() => {});
+  getFootballCompetitions().catch(() => {});
 });

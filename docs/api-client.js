@@ -1311,8 +1311,85 @@
       return getPlayerDashboard(playerMatch[1], last);
     }
 
+    // ========================================================================
+    // GS Status Football — rotas da API (frontend)
+    // ========================================================================
+    const footballCompetitionsMatch = pathname.match(/^\/api\/football\/competitions$/);
+    if (footballCompetitionsMatch) {
+      return { season: '2026', competitions: await getFootballCompetitions() };
+    }
+
+    const footballSlateMatch = pathname.match(/^\/api\/football\/slate$/);
+    if (footballSlateMatch) {
+      const comp = url.searchParams.get('comp') || null;
+      const date = url.searchParams.get('date') || null;
+      return { season: '2026', games: await getFootballSlate(comp, date) };
+    }
+
+    const footballTeamMatch = pathname.match(/^\/api\/football\/team\/([\d]+)$/);
+    if (footballTeamMatch) {
+      const compId = url.searchParams.get('comp') || '';
+      return await getFootballTeam(footballTeamMatch[1], compId);
+    }
+
+    const footballPlayerMatch = pathname.match(/^\/api\/football\/player\/([\d]+)$/);
+    if (footballPlayerMatch) {
+      return await getFootballPlayer(footballPlayerMatch[1]);
+    }
+
+    const footballPlayerLogMatch = pathname.match(/^\/api\/football\/player-log\/([\d]+)$/);
+    if (footballPlayerLogMatch) {
+      const last = Math.min(Math.max(Number(url.searchParams.get('last') || 10), 1), 30);
+      return await getFootballPlayerLog(footballPlayerLogMatch[1], last);
+    }
+
     throw new Error('Rota não encontrada');
   }
 
   window.NBAApi = { request, SEASON, SEASON_LABEL };
 })();
+
+// ============================================================================
+// GS Status Football — funções de busca (frontend -> servidor)
+// ============================================================================
+
+async function getFootballCompetitions() {
+  return window.NBAApi.request('/api/football/competitions');
+}
+
+async function getFootballSlate(comp, date) {
+  const qs = new URLSearchParams();
+  if (comp) qs.set('comp', comp);
+  if (date) qs.set('date', date);
+  const path = qs.toString() ? `/api/football/slate?${qs.toString()}` : '/api/football/slate';
+  const res = await fetch(path, { signal: AbortSignal.timeout(30000) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function getFootballTeam(teamId, compId) {
+  const qs = new URLSearchParams();
+  if (compId) qs.set('comp', compId);
+  const path = qs.toString() ? `/api/football/team/${teamId}?${qs.toString()}` : `/api/football/team/${teamId}`;
+  const res = await fetch(path, { signal: AbortSignal.timeout(30000) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function getFootballPlayer(playerId) {
+  const res = await fetch(`/api/football/player/${playerId}`, { signal: AbortSignal.timeout(30000) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function getFootballPlayerLog(playerId, last) {
+  const res = await fetch(`/api/football/player-log/${playerId}?last=${last}`, { signal: AbortSignal.timeout(30000) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function getFootballCompetitions() {
+  const res = await fetch('/api/football/competitions', { signal: AbortSignal.timeout(30000) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}

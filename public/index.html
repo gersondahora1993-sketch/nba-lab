@@ -47,6 +47,19 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3v18M5 7l-2 5h4L5 7zM19 7l-2 5h4l-2-5z"/><path d="M4 17h4M16 17h4"/></svg>
           <span>Comparador</span>
         </button>
+        <div class="nav-divider">⚽ Futebol</div>
+        <button class="nav-item" data-view="football-overview">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 18 9 18 9 6L17 6z"/></svg>
+          <span>Futebol — Visão geral</span>
+        </button>
+        <button class="nav-item" data-view="football-teams">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l7 3v5c0 4.4-2.9 8.2-7 10-4.1-1.8-7-5.6-7-10V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>
+          <span>Times</span>
+        </button>
+        <button class="nav-item" data-view="football-players">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+          <span>Jogadores</span>
+        </button>
       </nav>
 
       <div class="sidebar-foot">
@@ -374,6 +387,146 @@
         <div class="card">
           <div class="card-head"><div><h3>Médias frente a frente</h3><span class="hint">Melhor valor em destaque</span></div></div>
           <div class="table-wrap" id="cmp-table"></div>
+        </div>
+      </section>
+
+      <!-- ============================ FUTEBOL: VISÃO GERAL ============================ -->
+      <section id="view-football-overview" class="view">
+        <div class="hero card">
+          <div class="hero-copy">
+            <span class="eyebrow">GS Status Football</span>
+            <h2>Análise de futebol.<br /><span class="grad-text">Probabilidades, estatísticas e odds.</span></h2>
+            <p>Times, jogadores, mercados de gols, escanteios, cartões e muito mais — L5/L10/L15/L20, 🔥 melhor entrada e odds da 99play e br365. Gratuito, sem assinatura.</p>
+            <div class="hero-actions">
+              <button class="btn primary" data-goto="football-teams">Analisar um time</button>
+              <button class="btn ghost" data-goto="football-players">Analisar um jogador</button>
+            </div>
+          </div>
+          <div class="hero-side">
+            <div class="hero-stat"><span>Competições</span><strong>8</strong><small>Brasil, Inglaterra, Espanha, Itália, Alemanha, França, EUA e mais</small></div>
+            <div class="hero-stat"><span>Janelas</span><strong>L5/10/15/20</strong><small>aproveitamento e acertos</small></div>
+            <div class="hero-stat"><span>Odds</span><strong>99play · br365</strong><small>melhor odd em destaque</small></div>
+          </div>
+        </div>
+
+        <section id="football-slate" class="radar-section">
+          <div class="section-head">
+            <h3>Jogos de hoje — Futebol</h3>
+            <span class="hint" id="football-slate-updated">Atualizado automaticamente</span>
+          </div>
+          <div id="football-slate-grid" class="slate-grid">
+            <div class="skeleton-card"></div>
+            <div class="skeleton-card"></div>
+            <div class="skeleton-card"></div>
+          </div>
+        </section>
+
+        <section id="football-best-bets" class="radar-section" hidden>
+          <div class="section-head">
+            <h3>🔥 Melhores entradas do dia</h3>
+            <span class="hint" id="football-best-hint">Maior probabilidade × melhor odd</span>
+          </div>
+          <div id="football-best-list" class="radar-list"></div>
+        </section>
+      </section>
+
+      <!-- ============================ FUTEBOL: TIMES ============================ -->
+      <section id="view-football-teams" class="view">
+        <div class="control-bar card">
+          <label class="field">
+            <span>Competição</span>
+            <select id="football-comp-select"></select>
+          </label>
+          <label class="field">
+            <span>Time</span>
+            <select id="football-team-select"></select>
+          </label>
+          <label class="field small">
+            <span>Período</span>
+            <select id="football-last">
+              <option value="5" selected>Últimos 5</option>
+              <option value="10">Últimos 10</option>
+              <option value="15">Últimos 15</option>
+              <option value="20">Últimos 20</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="football-team-header" class="entity-head"></div>
+        <div id="football-team-kpis" class="kpi-grid"></div>
+
+        <div id="football-team-analysis" class="player-analysis"></div>
+
+        <div class="grid two">
+          <div class="card chart-card">
+            <div class="card-head"><div><h3>Gols por jogo</h3><span class="hint">Marcados, sofridos e total</span></div></div>
+            <div class="chart-box tall"><canvas id="chart-football-team-goals"></canvas></div>
+          </div>
+          <div class="card chart-card">
+            <div class="card-head"><div><h3>Escanteios</h3><span class="hint">A favor e contra por jogo</span></div></div>
+            <div class="chart-box tall"><canvas id="chart-football-team-corners"></canvas></div>
+          </div>
+          <div class="card chart-card">
+            <div class="card-head"><div><h3>Cartões e faltas</h3><span class="hint">Amarelos, vermelhos e faltas</span></div></div>
+            <div class="chart-box tall"><canvas id="chart-football-team-cards"></canvas></div>
+          </div>
+          <div class="card chart-card">
+            <div class="card-head"><div><h3>Chutes e finalizações</h3><span class="hint">Totais e no alvo</span></div></div>
+            <div class="chart-box tall"><canvas id="chart-football-team-shots"></canvas></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><div><h3>Últimos jogos</h3><span class="hint">Resultado e estatísticas</span></div></div>
+          <div class="table-wrap" id="football-team-games-table"></div>
+        </div>
+      </section>
+
+      <!-- ============================ FUTEBOL: JOGADORES ============================ -->
+      <section id="view-football-players" class="view">
+        <div class="card picker-bar">
+          <div class="picker" id="football-player-picker">
+            <div class="search-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+              <input type="text" placeholder="Busque um jogador (ex.: Haaland, Mbappé, Vinicius Jr…)" autocomplete="off" spellcheck="false" />
+              <div class="search-results"></div>
+            </div>
+          </div>
+          <select id="football-player-last" class="inline-select">
+            <option value="5" selected>Últimos 5 jogos</option>
+            <option value="10">Últimos 10 jogos</option>
+            <option value="15">Últimos 15 jogos</option>
+            <option value="20">Últimos 20 jogos</option>
+          </select>
+        </div>
+
+        <div id="football-player-header" class="entity-head"></div>
+        <div id="football-player-kpis" class="kpi-grid"></div>
+
+        <div id="football-player-analysis" class="player-analysis"></div>
+
+        <div class="grid two">
+          <div class="card chart-card">
+            <div class="card-head"><div><h3>Gols e assistências</h3><span class="hint">Jogo a jogo</span></div></div>
+            <div class="chart-box tall"><canvas id="chart-football-player-goals"></canvas></div>
+          </div>
+          <div class="card chart-card">
+            <div class="card-head"><div><h3>Chutes e finalizações</h3><span class="hint">Totais e no alvo</span></div></div>
+            <div class="chart-box tall"><canvas id="chart-football-player-shots"></canvas></div>
+          </div>
+          <div class="card chart-card">
+            <div class="card-head"><div><h3>Desarmes e faltas</h3><span class="hint">Tackles, cartões e faltas</span></div></div>
+            <div class="chart-box tall"><canvas id="chart-football-player-defense"></canvas></div>
+          </div>
+          <div class="card chart-card">
+            <div class="card-head"><div><h3>Goleiro — defesas</h3><span class="hint">Saves por jogo (se goleiro)</span></div></div>
+            <div class="chart-box tall"><canvas id="chart-football-player-saves"></canvas></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><div><h3>Desempenho jogo a jogo</h3><span class="hint">Últimos jogos da temporada</span></div></div>
+          <div class="table-wrap" id="football-player-games-table"></div>
         </div>
       </section>
 
