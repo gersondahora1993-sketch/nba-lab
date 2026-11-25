@@ -816,55 +816,69 @@ async function getFootballCompetitions() {
 }
 
 async function getFootballSlate(competitionKey = null, dateStr = null) {
-  const date = dateStr || espnDateStr();
+  const dates = dateStr ? [dateStr] : [];
+  // Se não passou data específica, busca dos últimos 7 dias para garantir jogos
+  if (!dateStr) {
+    const today = new Date();
+    for (let i = 0; i < 7; i += 1) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      dates.push(espnDateStr(d));
+    }
+  }
   const comps = competitionKey ? [FOOTBALL_COMPETITIONS[competitionKey]] : Object.values(FOOTBALL_COMPETITIONS);
   const results = [];
+  const seenIds = new Set();
   for (const comp of comps) {
-    try {
-      const json = await football(`${ESPN_FOOTBALL_SITE}/${comp.id}/scoreboard?dates=${date}`, 90, `football:slate:${comp.id}:${date}`);
-      const league = json?.leagues?.[0] || {};
-      const compName = league.name || comp.name;
-      const season = league.season || {};
-      const events = json?.events || [];
-      for (const event of events) {
-        const compData = event.competitions?.[0];
-        if (!compData) continue;
-        const competitors = (compData.competitors || []).map((c) => footballCompetitorFromScoreboard(c));
-        const home = competitors.find((c) => c.homeAway === 'home');
-        const away = competitors.find((c) => c.homeAway === 'away');
-        const odds = compData?.odds?.[0];
-        results.push({
-          id: String(event.id),
-          name: event.name,
-          date: event.date,
-          competition: compName,
-          competitionKey: comp.key,
-          competitionId: comp.id,
-          seasonYear: season.year || 2026,
-          venue: compData?.venue?.fullName || '',
-          status: {
-            state: compData?.status?.type?.state || 'pre',
-            detail: compData?.status?.type?.shortDetail || compData?.status?.type?.description || '',
-            completed: Boolean(compData?.status?.type?.completed),
-            clock: compData?.status?.displayClock || null,
-          },
-          competitors: { home, away },
-          homeTeam: home,
-          awayTeam: away,
-          odds: odds
-            ? {
-                provider: odds.provider?.name || '',
-                spread: Number.isFinite(odds.spread) ? odds.spread : null,
-                total: Number.isFinite(odds.overUnder) ? odds.overUnder : null,
-                homeMoney: odds.moneyline?.home?.close?.odds || '',
-                awayMoney: odds.moneyline?.away?.close?.odds || '',
-                drawMoney: odds.moneyline?.draw?.close?.odds || '',
-              }
-            : null,
-        });
+    for (const date of dates) {
+      try {
+        const json = await football(`${ESPN_FOOTBALL_SITE}/${comp.id}/scoreboard?dates=${date}`, 90, `football:slate:${comp.id}:${date}`);
+        const league = json?.leagues?.[0] || {};
+        const compName = league.name || comp.name;
+        const season = league.season || {};
+        const events = json?.events || [];
+        for (const event of events) {
+          if (seenIds.has(String(event.id))) continue;
+          seenIds.add(String(event.id));
+          const compData = event.competitions?.[0];
+          if (!compData) continue;
+          const competitors = (compData.competitors || []).map((c) => footballCompetitorFromScoreboard(c));
+          const home = competitors.find((c) => c.homeAway === 'home');
+          const away = competitors.find((c) => c.homeAway === 'away');
+          const odds = compData?.odds?.[0];
+          results.push({
+            id: String(event.id),
+            name: event.name,
+            date: event.date,
+            competition: compName,
+            competitionKey: comp.key,
+            competitionId: comp.id,
+            seasonYear: season.year || 2026,
+            venue: compData?.venue?.fullName || '',
+            status: {
+              state: compData?.status?.type?.state || 'pre',
+              detail: compData?.status?.type?.shortDetail || compData?.status?.type?.description || '',
+              completed: Boolean(compData?.status?.type?.completed),
+              clock: compData?.status?.displayClock || null,
+            },
+            competitors: { home, away },
+            homeTeam: home,
+            awayTeam: away,
+            odds: odds
+              ? {
+                  provider: odds.provider?.name || '',
+                  spread: Number.isFinite(odds.spread) ? odds.spread : null,
+                  total: Number.isFinite(odds.overUnder) ? odds.overUnder : null,
+                  homeMoney: odds.moneyline?.home?.close?.odds || '',
+                  awayMoney: odds.moneyline?.away?.close?.odds || '',
+                  drawMoney: odds.moneyline?.draw?.close?.odds || '',
+                }
+              : null,
+          });
+        }
+      } catch {
+        /* competition pode não ter dados nessa data */
       }
-    } catch {
-      /* competition pode não ter dados hoje */
     }
   }
   results.sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
