@@ -3867,15 +3867,15 @@ async function initFootball() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-  bindAnalysis();
-  bindTeamAnalysis();
-  bindFootballNavigation();
-  bindDashboardNav();
-  init();
-  await initFootball();
-  await loadDashboardStats();
-  await loadBestBets();
-  await loadDashboardFootballSlate();
+  try { bindAnalysis(); } catch (e) { console.error('bindAnalysis error', e); }
+  try { bindTeamAnalysis(); } catch (e) { console.error('bindTeamAnalysis error', e); }
+  try { bindFootballNavigation(); } catch (e) { console.error('bindFootballNavigation error', e); }
+  try { bindDashboardNav(); } catch (e) { console.error('bindDashboardNav error', e); }
+  try { init(); } catch (e) { console.error('init error', e); }
+  try { await initFootball(); } catch (e) { console.error('initFootball error', e); }
+  try { await loadDashboardStats(); } catch (e) { console.error('loadDashboardStats error', e); }
+  try { await loadBestBets(); } catch (e) { console.error('loadBestBets error', e); }
+  try { await loadDashboardFootballSlate(); } catch (e) { console.error('loadDashboardFootballSlate error', e); }
   if ('serviceWorker' in navigator && /^https?:$/.test(window.location.protocol)) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
