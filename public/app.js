@@ -3872,6 +3872,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   try { bindFootballNavigation(); } catch (e) { console.error('bindFootballNavigation error', e); }
   try { bindDashboardNav(); } catch (e) { console.error('bindDashboardNav error', e); }
   try { init(); } catch (e) { console.error('init error', e); }
+  
+  // Pequeno atraso para estabilizar o carregamento inicial
+  await new Promise(r => setTimeout(r, 800));
+  
   try { await initFootball(); } catch (e) { console.error('initFootball error', e); }
   try { await loadDashboardStats(); } catch (e) { console.error('loadDashboardStats error', e); }
   try { await loadBestBets(); } catch (e) { console.error('loadBestBets error', e); }
