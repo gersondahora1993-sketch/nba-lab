@@ -3866,16 +3866,16 @@ async function initFootball() {
   }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   bindAnalysis();
   bindTeamAnalysis();
   bindFootballNavigation();
   bindDashboardNav();
   init();
-  initFootball();
-  loadDashboardStats();
-  loadBestBets();
-  loadDashboardFootballSlate();
+  await initFootball();
+  await loadDashboardStats();
+  await loadBestBets();
+  await loadDashboardFootballSlate();
   if ('serviceWorker' in navigator && /^https?:$/.test(window.location.protocol)) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }

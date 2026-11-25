@@ -1442,7 +1442,7 @@ async function getFootballCompetitions() {
         out.push({ key, id: comp.id, name: comp.name, country: comp.country, flag: comp.flag, seasonYear: 2026, seasonType: 'Temporada', hasEvents: false });
       }
     }
-    return out;
+    return { competitions: out };
   });
 }
 
@@ -1450,7 +1450,7 @@ async function getFootballSlate(comp, date) {
   const dates = date ? [date] : [];
   if (!date) {
     const today = new Date();
-    for (let i = 0; i < 7; i += 1) {
+    for (let i = 0; i < 3; i += 1) {
       const d = new Date(today);
       d.setDate(d.getDate() - i);
       dates.push(espnDateStr(d));
@@ -1508,7 +1508,7 @@ async function getFootballSlate(comp, date) {
     }
   }
   results.sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
-  return results;
+  return { games: results };
 }
 
 async function getFootballTeam(teamId, compId) {
