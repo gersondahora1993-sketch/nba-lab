@@ -82,83 +82,123 @@
 
       <!-- ============================ VISÃO GERAL ============================ -->
       <section id="view-overview" class="view active">
-        <div class="hero card">
-          <div class="hero-copy">
-            <span class="eyebrow">Central de análise</span>
-            <h2>Props analisadas.<br /><span class="grad-text">Probabilidades e odds.</span></h2>
-            <p>Médias por jogo, aproveitamento L5/L10/L20, gráficos verde/vermelho contra a linha e a odd da 99play em cada mercado — 100% gratuito, sem assinatura.</p>
-            <div class="hero-actions">
-              <button class="btn primary" data-goto="teams">Analisar um time</button>
-              <button class="btn ghost" data-goto="players">Analisar um jogador</button>
-            </div>
+        <!-- Dashboard moderno com cards de navegação -->
+        <div class="dashboard-hero">
+          <div class="dashboard-hero-text">
+            <span class="dashboard-eyebrow">GS Stats PRO</span>
+            <h1>Análise de Apostas Esportivas</h1>
+            <p>Probabilidades, estatísticas e melhores entradas para NBA e Futebol — 100% gratuito, sem assinatura.</p>
           </div>
-          <div class="hero-side">
-            <div class="hero-stat"><span>Mercados</span><strong>20</strong><small>por jogador, jogo a jogo</small></div>
-            <div class="hero-stat"><span>Janelas</span><strong>L5/10/20</strong><small>aproveitamento e acertos</small></div>
-            <div class="hero-stat"><span>Odds</span><strong>99play</strong><small>linha real da casa</small></div>
+          <div class="dashboard-quick-stats">
+            <div class="qstat"><div class="qstat-value" id="qs-games">—</div><div class="qstat-label">Jogos Hoje</div></div>
+            <div class="qstat"><div class="qstat-value" id="qs-best">—</div><div class="qstat-label">Melhores Entradas</div></div>
+            <div class="qstat"><div class="qstat-value" id="qs-leagues">—</div><div class="qstat-label">Competições</div></div>
           </div>
         </div>
 
-        <section id="overview-radar" class="radar-section" hidden>
+        <!-- Cards de navegação principal -->
+        <div class="nav-cards">
+          <a class="nav-card" data-goto="overview">
+            <div class="nav-card-icon">📊</div>
+            <div class="nav-card-info">
+              <div class="nav-card-title">Visão Geral</div>
+              <div class="nav-card-sub">Jogos do dia e melhores probabilidades</div>
+            </div>
+            <div class="nav-card-arrow">▸</div>
+          </a>
+
+          <a class="nav-card" data-goto="players">
+            <div class="nav-card-icon">👤</div>
+            <div class="nav-card-info">
+              <div class="nav-card-title">Jogadores</div>
+              <div class="nav-card-sub">Análise de props e aproveitamento NBA</div>
+            </div>
+            <div class="nav-card-arrow">▸</div>
+          </a>
+
+          <a class="nav-card" data-goto="teams">
+            <div class="nav-card-icon">🏀</div>
+            <div class="nav-card-info">
+              <div class="nav-card-title">Times</div>
+              <div class="nav-card-sub">Estatísticas e confrontos de times NBA</div>
+            </div>
+            <div class="nav-card-arrow">▸</div>
+          </a>
+
+          <a class="nav-card" data-goto="football-overview">
+            <div class="nav-card-icon">⚽</div>
+            <div class="nav-card-info">
+              <div class="nav-card-title">Futebol</div>
+              <div class="nav-card-sub">Champions, Brasileirão, ligas europeias e mais</div>
+            </div>
+            <div class="nav-card-arrow">▸</div>
+          </a>
+
+          <a class="nav-card" data-goto="combos">
+            <div class="nav-card-icon">🎯</div>
+            <div class="nav-card-info">
+              <div class="nav-card-title">Combos</div>
+              <div class="nav-card-sub">Análise de múltiplos mercados combinados</div>
+            </div>
+            <div class="nav-card-arrow">▸</div>
+          </a>
+
+          <a class="nav-card" data-goto="compare">
+            <div class="nav-card-icon">⚖️</div>
+            <div class="nav-card-info">
+              <div class="nav-card-title">Comparador</div>
+              <div class="nav-card-sub">Dois jogadores lado a lado</div>
+            </div>
+            <div class="nav-card-arrow">▸</div>
+          </a>
+        </div>
+
+        <!-- Melhores entradas do dia -->
+        <section class="radar-section" id="overview-best-bets">
           <div class="section-head">
-            <h3>Radar de apostas GS Stats PRO</h3>
-            <span class="hint" id="radar-hint">Props ordenadas pela probabilidade estimada</span>
+            <h3>🔥 Melhores Entradas do Dia</h3>
+            <span class="hint" id="best-bets-hint">Ordenadas por probabilidade × odd</span>
           </div>
           <div class="grid two">
             <div class="card">
               <div class="card-head">
                 <div>
-                  <h3>Melhores props do dia</h3>
-                  <span class="hint">Probabilidade + odd da 99play · gratuito</span>
+                  <h3>Top Entradas — Jogadores & Times</h3>
+                  <span class="hint">Clique na odd para apostar direto na casa</span>
                 </div>
-                <span class="badge orange">auto</span>
+                <span class="badge orange">auto · atualizado</span>
               </div>
-              <div id="radar-list" class="radar-list"></div>
+              <div id="best-bets-list" class="radar-list">
+                <div class="loading"><span class="spinner"></span>Buscando melhores entradas…</div>
+              </div>
             </div>
             <div class="card chart-card">
               <div class="card-head">
                 <div>
-                  <h3>Probabilidades estimadas</h3>
-                  <span class="hint">Quanto maior, mais vezes o atleta superou a linha</span>
+                  <h3>Distribuição de Probabilidades</h3>
+                  <span class="hint">Quantas entradas acima de cada faixa de acerto</span>
                 </div>
               </div>
-              <div class="chart-box tall"><canvas id="chart-overview-probs"></canvas></div>
+              <div class="chart-box tall"><canvas id="chart-overview-prob-dist"></canvas></div>
             </div>
           </div>
         </section>
 
-        <section id="overview-team-props" class="radar-section" hidden>
-          <div class="section-head">
-            <h3>Props de times do dia</h3>
-            <span class="hint" id="team-props-hint">Totais de time com a melhor entrada da casa</span>
-          </div>
-          <div class="card">
-            <div class="card-head">
-              <div>
-                <h3>Melhores entradas nos times</h3>
-                <span class="hint">Pontos, assistências, cestas de 3, roubos e tocos · odd da 99play</span>
-              </div>
-              <span class="badge orange">auto</span>
-            </div>
-            <div id="team-props-list" class="radar-list">
-              <div class="loading"><span class="spinner"></span>Calculando totais dos times…</div>
-            </div>
-          </div>
-        </section>
-
+        <!-- Jogos de hoje -->
         <div class="section-head">
-          <h3>Jogos de hoje</h3>
-          <span class="hint" id="slate-updated"></span>
+          <h3>⚽ Jogos de Hoje — Futebol</h3>
+          <span class="hint" id="football-slate-updated">Atualizado automaticamente</span>
         </div>
-        <div id="slate-grid" class="slate-grid">
+        <div id="football-slate-grid" class="slate-grid">
           <div class="skeleton-card"></div>
           <div class="skeleton-card"></div>
           <div class="skeleton-card"></div>
         </div>
 
+        <!-- Seção NBA existente mantida -->
         <div class="section-head">
-          <h3>Melhores jogadores em ação</h3>
-          <span class="hint">Médias da temporada · clique para abrir a análise do jogador</span>
+          <h3>🏀 Melhores Jogadores em Ação — NBA</h3>
+          <span class="hint">Médias da temporada · clique para abrir a análise</span>
         </div>
         <div id="overview-stars" class="leaders-grid"></div>
 
@@ -169,7 +209,7 @@
             </div>
             <div>
               <h4>Como usar na análise</h4>
-              <p>Comece pelo <b>perfil do time</b> (ritmo, pontos e arremessos), entre nos <b>destaques individuais</b> e valide a linha do jogador na aba <b>Combos</b>.</p>
+              <p>Comece pela <b>Visão Geral</b> para ver as melhores entradas, entre nos <b>Jogadores</b> ou <b>Times</b> para detalhes, e valide no <b>Comparador</b>.</p>
             </div>
           </div>
           <div class="card info-card">
@@ -177,8 +217,8 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg>
             </div>
             <div>
-              <h4>Dados oficiais</h4>
-              <p>Boxscores, calendário e escalações vêm da API pública da ESPN. O cache local deixa as consultas rápidas depois da primeira carga.</p>
+              <h4>Dados oficiais ESPN</h4>
+              <p>Boxscores, calendário e escalações vêm da API pública da ESPN. Cache local deixa as consultas rápidas depois da primeira carga.</p>
             </div>
           </div>
         </div>

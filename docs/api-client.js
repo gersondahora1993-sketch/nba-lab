@@ -1377,7 +1377,9 @@ const FOOTBALL_COMPETITIONS = {
   'GER': { id: 'ger.1', name: 'Bundesliga', country: 'Alemanha', flag: '🇩🇪' },
   'FRA': { id: 'fra.1', name: 'Ligue 1', country: 'França', flag: '🇫🇷' },
   'USA': { id: 'usa.1', name: 'MLS', country: 'Estados Unidos', flag: '🇺🇸' },
-  'INTL': { id: 'intl.1', name: 'Competições Internacionais', country: 'Mundo', flag: '🌍' },
+  'CHAMPIONS': { id: 'uefa.1', name: 'UEFA Champions League', country: 'Europa', flag: '🏆' },
+  'LIBERTADORES': { id: 'conmebol.1', name: 'Copa Libertadores', country: 'América do Sul', flag: '🏆' },
+  'MUNDIAL': { id: 'fifa.1', name: 'Copa do Mundo FIFA', country: 'Mundo', flag: '🌍' },
 };
 
 function espnDateStr(d = new Date()) {

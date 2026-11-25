@@ -3744,6 +3744,109 @@ renderFootballTeam = function (data) {
 
 /* ------------------------------------- init futebol ------------------------------------- */
 
+/* ------------------------------------------------------ dashboard moderno */
+async function loadDashboardStats() {
+  try {
+    const [comps, slate] = await Promise.all([
+      getFootballCompetitions(),
+      getFootballSlate(),
+    ]);
+    const compsCount = comps.competitions?.length || 0;
+    const gamesCount = slate.games?.length || 0;
+    $('#qs-games').textContent = gamesCount;
+    $('#qs-leagues').textContent = compsCount;
+    let bestCount = 0;
+    try { bestCount += document.querySelectorAll('#radar-list .radar-item').length; } catch { /* ok */ }
+    try { bestCount += document.querySelectorAll('#team-props-list .radar-item').length; } catch { /* ok */ }
+    $('#qs-best').textContent = bestCount;
+    state.football.competitions = comps.competitions || [];
+    state.football.slate = slate.games || [];
+  } catch (err) { console.error('dashboard stats error', err); }
+}
+
+async function loadBestBets() {
+  const list = $('#best-bets-list');
+  const hint = $('#best-bets-hint');
+  if (!list) return;
+  list.innerHTML = '<div class="loading"><span class="spinner"></span>Buscando melhores entradas…</div>';
+  try {
+    const bets = [];
+    try {
+      const radarItems = [...document.querySelectorAll('#radar-list .radar-item')];
+      for (const item of radarItems.slice(0, 5)) {
+        const name = item.querySelector('strong')?.textContent || '';
+        const prob = item.querySelector('.radar-prob')?.textContent || '0';
+        const odd = item.querySelector('.radar-odd')?.textContent || '—';
+        const betText = item.querySelector('.radar-bet')?.textContent || '';
+        bets.push({ team: name, market: betText.replace(/Over\s*/i, '').trim() || 'Props', line: 0, odd: odd === '—' ? null : parseFloat(odd.replace(',', '.')) || null, probability: parseInt(prob) || 0, book: '99play', betUrl: 'https://99play.io/sports#/sport/67' });
+      }
+    } catch { /* ok */ }
+    try {
+      const teamItems = [...document.querySelectorAll('#team-props-list .radar-item')];
+      for (const item of teamItems.slice(0, 5)) {
+        const name = item.querySelector('strong')?.textContent || '';
+        const prob = item.querySelector('.radar-prob')?.textContent || '0';
+        const odd = item.querySelector('.radar-odd')?.textContent || '—';
+        const betText = item.querySelector('.radar-bet')?.textContent || '';
+        bets.push({ team: name, market: betText.replace(/Over\s*/i, '').trim() || 'Props', line: 0, odd: odd === '—' ? null : parseFloat(odd.replace(',', '.')) || null, probability: parseInt(prob) || 0, book: '99play', betUrl: 'https://99play.io/sports#/sport/67' });
+      }
+    } catch { /* ok */ }
+    try {
+      for (const game of state.football.slate.slice(0, 6)) {
+        if (!game.odds) continue;
+        const home = game.homeTeam, away = game.awayTeam;
+        if (!home || !away) continue;
+        const line = game.odds.total;
+        if (!line) continue;
+        const oddVal = game.odds.homeMoney || game.odds.awayMoney || null;
+        bets.push({ team: `${home.name} x ${away.name}`, market: `Total de gols Over ${fmt(line, 1)}`, line, odd: oddVal ? parseFloat(oddVal.replace(',', '.')) || null : null, probability: 60, book: game.odds.provider || '99play', betUrl: 'https://99play.io/sports#/sport/1' });
+      }
+    } catch { /* ok */ }
+    bets.sort((a, b) => b.probability - a.probability || (b.odd || 0) - (a.odd || 0));
+    const top = bets.slice(0, 8);
+    if (hint) hint.textContent = `${top.length} entradas · probabilidade × odd`;
+    list.innerHTML = top.map((b, i) => `
+      <button type="button" class="radar-item best-bet-item" data-bet-url="${escapeHtml(b.betUrl)}">
+        <span class="best-rank">${i + 1}</span>
+        <span class="best-body">
+          <div class="best-top"><span class="best-name">${escapeHtml(b.team)}</span><span class="best-prob">${b.probability}%</span></div>
+          <div class="best-bet">Over ${escapeHtml(b.market)}</div>
+          <div class="best-meta"><span class="best-odd">${b.odd ? fmt(b.odd, 2) : '—'}</span><span class="best-book">${escapeHtml(b.book)}</span></div>
+        </span>
+      </button>
+    `).join('');
+    renderProbDistChart(top);
+  } catch (err) { console.error('best bets error', err); list.innerHTML = '<div class="loading">Não foi possível carregar as entradas.</div>'; }
+}
+
+function renderProbDistChart(bets) {
+  const canvas = $('#chart-overview-prob-dist');
+  if (!canvas) return;
+  const ranges = ['50-60%', '60-70%', '70-80%', '80-90%', '90%+'];
+  const counts = ranges.map(() => 0);
+  for (const b of bets) { const p = b.probability; if (p >= 90) counts[4]++; else if (p >= 80) counts[3]++; else if (p >= 70) counts[2]++; else if (p >= 60) counts[1]++; else counts[0]++; }
+  makeChart('chart-overview-prob-dist', { type: 'bar', data: { labels: ranges, datasets: [{ label: 'Entradas', data: counts, backgroundColor: counts.map((c, i) => i >= 4 ? '#4ade80' : i >= 3 ? '#60a5fa' : i >= 2 ? '#fbbf24' : i >= 1 ? '#f97316' : '#f87171'), borderRadius: 6 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 }, title: { display: true, text: 'Qtd', color: '#8b8b96', font: { size: 11 } } }, x: { ticks: { color: '#8b8b96', font: { size: 11 } } } } } });
+}
+
+async function loadDashboardFootballSlate() {
+  const grid = $('#football-slate-grid');
+  if (!grid) return;
+  try {
+    const data = await getFootballSlate();
+    state.football.slate = data.games || [];
+    renderFootballSlate(state.football.slate);
+    const updated = $('#football-slate-updated');
+    if (updated) updated.textContent = `Atualizado ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+  } catch (err) { console.error('dashboard slate error', err); grid.innerHTML = '<div class="loading">Não foi possível carregar os jogos.</div>'; }
+}
+
+function bindDashboardNav() {
+  document.addEventListener('click', (event) => {
+    const card = event.target.closest('.nav-card');
+    if (card) { const view = card.dataset.goto; if (view) goTo(view); }
+  });
+}
+
 async function initFootball() {
   try {
     const data = await getFootballCompetitions();
@@ -3767,8 +3870,12 @@ document.addEventListener('DOMContentLoaded', () => {
   bindAnalysis();
   bindTeamAnalysis();
   bindFootballNavigation();
+  bindDashboardNav();
   init();
   initFootball();
+  loadDashboardStats();
+  loadBestBets();
+  loadDashboardFootballSlate();
   if ('serviceWorker' in navigator && /^https?:$/.test(window.location.protocol)) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
