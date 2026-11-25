@@ -1350,46 +1350,259 @@
 })();
 
 // ============================================================================
-// GS Status Football — funções de busca (frontend -> servidor)
+// GS Status Football — funções de busca (frontend -> APIs externas ESPN)
+// Chamam diretamente as APIs da ESPN, funcionando tanto em localhost quanto no
+// GitHub Pages (não dependem do servidor Node.js local).
 // ============================================================================
 
+// Cache simples em memória para as funções de futebol (fora do IIFE do NBAApi)
+const footballCache = new Map();
+function footballCached(key, ttlMs, producer) {
+  const now = Date.now();
+  const hit = footballCache.get(key);
+  if (hit && now - hit.t < ttlMs) return hit.v;
+  const value = producer();
+  footballCache.set(key, { t: now, v: value });
+  return value;
+}
+
+const ESPN_FOOTBALL_SITE = 'https://site.api.espn.com/apis/site/v2/sports/soccer';
+const ESPN_FOOTBALL_CORE = 'https://sports.core.api.espn.com/v2/sports/soccer';
+
+const FOOTBALL_COMPETITIONS = {
+  'BR': { id: 'bra.1', name: 'Campeonato Brasileiro Série A', country: 'Brasil', flag: '🇧🇷' },
+  'ENG': { id: 'eng.1', name: 'Premier League', country: 'Inglaterra', flag: '🇬🇧' },
+  'ESP': { id: 'esp.1', name: 'La Liga', country: 'Espanha', flag: '🇪🇸' },
+  'ITA': { id: 'ita.1', name: 'Serie A', country: 'Itália', flag: '🇮🇹' },
+  'GER': { id: 'ger.1', name: 'Bundesliga', country: 'Alemanha', flag: '🇩🇪' },
+  'FRA': { id: 'fra.1', name: 'Ligue 1', country: 'França', flag: '🇫🇷' },
+  'USA': { id: 'usa.1', name: 'MLS', country: 'Estados Unidos', flag: '🇺🇸' },
+  'INTL': { id: 'intl.1', name: 'Competições Internacionais', country: 'Mundo', flag: '🌍' },
+};
+
+function espnDateStr(d = new Date()) {
+  return d.toISOString().slice(0, 10).replace(/-/g, '');
+}
+
+async function footballFetch(url, ttlMs = 30000) {
+  // Tenta direto primeiro; se falhar por CORS, usa o relay jina.ai
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(ttlMs) });
+    if (res.ok) return res.json();
+  } catch { /* tenta relay abaixo */ }
+  const relayUrl = 'https://r.jina.ai/' + url;
+  const res = await fetch(relayUrl, { signal: AbortSignal.timeout(ttlMs) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const text = await res.text();
+  const start = text.search(/[[{]/);
+  if (start < 0) throw new Error('Resposta inválida');
+  return JSON.parse(text.slice(start));
+}
+
+function footballCompetitorFromScoreboard(c) {
+  const team = c.team || {};
+  const stats = {};
+  for (const s of c.statistics || []) {
+    stats[s.name] = Number(s.displayValue) || 0;
+  }
+  return {
+    id: String(c.id || team.id || ''),
+    homeAway: c.homeAway || '',
+    name: team.displayName || team.name || '',
+    abbr: team.abbreviation || '',
+    shortName: team.shortDisplayName || '',
+    logo: team.logo || '',
+    score: Number(c.score) || 0,
+    winner: Boolean(c.winner),
+    form: c.form || '',
+    stats,
+  };
+}
+
 async function getFootballCompetitions() {
-  return window.NBAApi.request('/api/football/competitions');
+  return footballCached(`football:competitions:v1`, 12 * 3600 * 1000, async () => {
+    const out = [];
+    for (const [key, comp] of Object.entries(FOOTBALL_COMPETITIONS)) {
+      try {
+        const json = await footballFetch(`${ESPN_FOOTBALL_SITE}/${comp.id}`);
+        const season = json?.season || json?.seasons?.[0] || {};
+        out.push({
+          key,
+          id: comp.id,
+          name: comp.name,
+          country: comp.country,
+          flag: comp.flag,
+          seasonYear: season.year || 2026,
+          seasonType: season.displayName || 'Temporada',
+          hasEvents: Boolean(json?.events?.length),
+        });
+      } catch {
+        out.push({ key, id: comp.id, name: comp.name, country: comp.country, flag: comp.flag, seasonYear: 2026, seasonType: 'Temporada', hasEvents: false });
+      }
+    }
+    return out;
+  });
 }
 
 async function getFootballSlate(comp, date) {
-  const qs = new URLSearchParams();
-  if (comp) qs.set('comp', comp);
-  if (date) qs.set('date', date);
-  const path = qs.toString() ? `/api/football/slate?${qs.toString()}` : '/api/football/slate';
-  const res = await fetch(path, { signal: AbortSignal.timeout(30000) });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  const dates = date ? [date] : [];
+  if (!date) {
+    const today = new Date();
+    for (let i = 0; i < 7; i += 1) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      dates.push(espnDateStr(d));
+    }
+  }
+  const comps = comp ? [FOOTBALL_COMPETITIONS[comp]] : Object.values(FOOTBALL_COMPETITIONS);
+  const results = [];
+  const seenIds = new Set();
+  for (const c of comps) {
+    for (const d of dates) {
+      try {
+        const json = await footballFetch(`${ESPN_FOOTBALL_SITE}/${c.id}/scoreboard?dates=${d}`);
+        const league = json?.leagues?.[0] || {};
+        const events = json?.events || [];
+        for (const event of events) {
+          if (seenIds.has(String(event.id))) continue;
+          seenIds.add(String(event.id));
+          const compData = event.competitions?.[0];
+          if (!compData) continue;
+          const competitors = (compData.competitors || []).map((c) => footballCompetitorFromScoreboard(c));
+          const home = competitors.find((c) => c.homeAway === 'home');
+          const away = competitors.find((c) => c.homeAway === 'away');
+          const odds = compData?.odds?.[0];
+          results.push({
+            id: String(event.id),
+            name: event.name,
+            date: event.date,
+            competition: league.name || c.name,
+            competitionKey: c.key,
+            competitionId: c.id,
+            seasonYear: league.season?.year || 2026,
+            venue: compData?.venue?.fullName || '',
+            status: {
+              state: compData?.status?.type?.state || 'pre',
+              detail: compData?.status?.type?.shortDetail || compData?.status?.type?.description || '',
+              completed: Boolean(compData?.status?.type?.completed),
+              clock: compData?.status?.displayClock || null,
+            },
+            competitors: { home, away },
+            homeTeam: home,
+            awayTeam: away,
+            odds: odds
+              ? {
+                  provider: odds.provider?.name || '',
+                  spread: Number.isFinite(odds.spread) ? odds.spread : null,
+                  total: Number.isFinite(odds.overUnder) ? odds.overUnder : null,
+                  homeMoney: odds.moneyline?.home?.close?.odds || '',
+                  awayMoney: odds.moneyline?.away?.close?.odds || '',
+                  drawMoney: odds.moneyline?.draw?.close?.odds || '',
+                }
+              : null,
+          });
+        }
+      } catch { /* sem dados nesta data/competição */ }
+    }
+  }
+  results.sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
+  return results;
 }
 
 async function getFootballTeam(teamId, compId) {
-  const qs = new URLSearchParams();
-  if (compId) qs.set('comp', compId);
-  const path = qs.toString() ? `/api/football/team/${teamId}?${qs.toString()}` : `/api/football/team/${teamId}`;
-  const res = await fetch(path, { signal: AbortSignal.timeout(30000) });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  return footballCached(`football:team:${teamId}:${compId}`, 6 * 3600 * 1000, async () => {
+    const games = [];
+    const dates = [];
+    const today = new Date();
+    for (let i = 0; i < 90; i += 1) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      dates.push(espnDateStr(d));
+    }
+    const compKeys = compId ? Object.keys(FOOTBALL_COMPETITIONS).filter((k) => FOOTBALL_COMPETITIONS[k].id === compId) : Object.keys(FOOTBALL_COMPETITIONS);
+    for (const ck of compKeys) {
+      const c = FOOTBALL_COMPETITIONS[ck];
+      for (const d of dates) {
+        if (games.length >= 30) break;
+        try {
+          const json = await footballFetch(`${ESPN_FOOTBALL_SITE}/${c.id}/scoreboard?dates=${d}`);
+          for (const event of json?.events || []) {
+            if (games.length >= 30) break;
+            const compData = event.competitions?.[0];
+            if (!compData) continue;
+            const competitors = (compData.competitors || []).map((cc) => footballCompetitorFromScoreboard(cc));
+            const me = competitors.find((cc) => String(cc.id) === String(teamId));
+            if (!me) continue;
+            const opp = competitors.find((cc) => String(cc.id) !== String(teamId));
+            games.push({
+              eventId: String(event.id),
+              date: event.date,
+              competition: c.name,
+              home: me.homeAway === 'home',
+              opp: opp ? { id: opp.id, name: opp.name, abbr: opp.abbr, logo: opp.logo } : null,
+              scoreFor: me.score,
+              scoreAgainst: opp ? opp.score : 0,
+              status: compData.status.type.completed ? 'completed' : 'scheduled',
+              stats: me.stats || {},
+              form: me.form || '',
+            });
+          }
+        } catch { /* skip */ }
+        if (games.length >= 30) break;
+      }
+      if (games.length >= 30) break;
+    }
+    games.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+    return { teamId, games: games.slice(0, 20), played: games.filter((g) => g.status === 'completed').length };
+  });
 }
 
 async function getFootballPlayer(playerId) {
-  const res = await fetch(`/api/football/player/${playerId}`, { signal: AbortSignal.timeout(30000) });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  return footballCached(`football:player:${playerId}`, 6 * 3600 * 1000, async () => {
+    let athlete = null;
+    try {
+      athlete = await footballFetch(`${ESPN_FOOTBALL_CORE}/seasons/2026/athletes/${playerId}`);
+    } catch { /* ok */ }
+    if (!athlete) {
+      return {
+        playerId: String(playerId),
+        name: `Jogador ${playerId}`,
+        shortName: '',
+        headshot: `https://a.espncdn.com/i/headshots/soccer/players/full/${playerId}.png`,
+        position: '',
+        jersey: '',
+        team: null,
+      };
+    }
+    const teamId = athlete?.team?.$ref?.match(/teams\/(\d+)/)?.[1] || null;
+    let team = null;
+    if (teamId) {
+      for (const comp of Object.values(FOOTBALL_COMPETITIONS)) {
+        try {
+          const t = await footballFetch(`${ESPN_FOOTBALL_SITE}/${comp.id}/teams`);
+          const found = (t.sports?.[0]?.leagues?.[0]?.teams || []).find((tm) => String(tm.team.id) === String(teamId));
+          if (found) {
+            team = { id: String(found.team.id), name: found.team.displayName, abbr: found.team.abbreviation, logo: found.team.logo };
+            break;
+          }
+        } catch { /* try next */ }
+      }
+    }
+    return {
+      playerId: String(playerId),
+      name: athlete?.fullName || `Jogador ${playerId}`,
+      shortName: athlete?.shortName || '',
+      headshot: athlete?.headshot?.href || `https://a.espncdn.com/i/headshots/soccer/players/full/${playerId}.png`,
+      position: athlete?.position?.displayName || '',
+      jersey: athlete?.jersey || '',
+      team,
+    };
+  });
 }
 
-async function getFootballPlayerLog(playerId, last) {
-  const res = await fetch(`/api/football/player-log/${playerId}?last=${last}`, { signal: AbortSignal.timeout(30000) });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
-}
-
-async function getFootballCompetitions() {
-  const res = await fetch('/api/football/competitions', { signal: AbortSignal.timeout(30000) });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+async function getFootballPlayerLog(playerId, last = 10) {
+  return footballCached(`football:player-log:${playerId}:${last}`, 6 * 3600 * 1000, async () => {
+    // Futebol: não há gamelog direto de jogador na ESPN pública.
+    return { playerId, games: [], played: 0, note: 'Estatísticas individuais por jogo via boxscore da partida' };
+  });
 }
