@@ -695,6 +695,7 @@ td.strong { color: #fff; font-weight: 600; }
   padding-bottom: 8px;
   margin-bottom: 12px;
   scrollbar-width: thin;
+  max-width: 100%;
 }
 
 .market-tabs::-webkit-scrollbar { height: 5px; }
@@ -702,6 +703,7 @@ td.strong { color: #fff; font-weight: 600; }
 
 .market-tab {
   flex: none;
+  flex-shrink: 0;
   padding: 7px 13px;
   border-radius: 999px;
   font-size: 12px;

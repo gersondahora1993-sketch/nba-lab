@@ -873,23 +873,24 @@ async function getFootballSlate(competitionKey = null, dateStr = null) {
 
 async function getFootballTeam(teamId, competitionId) {
   return cached(`football:team:${teamId}:${competitionId}`, 6 * 3600 * 1000, async () => {
-    // Busca jogos recentes do time consultando scoreboard de várias datas recentes
     const games = [];
     const dates = [];
     const today = new Date();
-    for (let i = 0; i < 45; i += 1) {
+    // Busca até 90 dias atrás para garantir encontrar jogos
+    for (let i = 0; i < 90; i += 1) {
       const d = new Date(today);
       d.setDate(d.getDate() - i);
       dates.push(espnDateStr(d));
     }
-    for (const compKey of Object.keys(FOOTBALL_COMPETITIONS)) {
+    const compKeys = competitionId ? Object.keys(FOOTBALL_COMPETITIONS).filter((k) => FOOTBALL_COMPETITIONS[k].id === competitionId) : Object.keys(FOOTBALL_COMPETITIONS);
+    for (const compKey of compKeys) {
       const comp = FOOTBALL_COMPETITIONS[compKey];
-      if (competitionId && comp.id !== competitionId) continue;
-      for (const date of dates.slice(0, 15)) {
-        if (games.length >= 20) break;
+      for (const date of dates) {
+        if (games.length >= 30) break;
         try {
           const json = await football(`${ESPN_FOOTBALL_SITE}/${comp.id}/scoreboard?dates=${date}`, 900, `football:teamdate:${comp.id}:${date}`);
           for (const event of json?.events || []) {
+            if (games.length >= 30) break;
             const compData = event.competitions?.[0];
             if (!compData) continue;
             const competitors = (compData.competitors || []).map((c) => footballCompetitorFromScoreboard(c));
@@ -905,14 +906,13 @@ async function getFootballTeam(teamId, competitionId) {
               scoreFor: me.score,
               scoreAgainst: opp ? opp.score : 0,
               status: compData.status.type.completed ? 'completed' : 'scheduled',
-              stats: me.stats,
-              form: me.form,
+              stats: me.stats || {},
+              form: me.form || '',
             });
           }
         } catch { /* skip */ }
-        if (games.length >= 20) break;
       }
-      if (games.length >= 20) break;
+      if (games.length >= 30) break;
     }
     games.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
     return { teamId, games: games.slice(0, 20), played: games.filter((g) => g.status === 'completed').length };

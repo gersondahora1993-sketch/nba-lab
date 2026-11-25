@@ -450,8 +450,8 @@ function goTo(view) {
   if (view === 'overview' && !state.slateLoaded) loadSlate();
   if (view === 'combos' && !state.comboData) ensureCombo();
   if (view === 'football-overview' && !state.football.slateDate) loadFootballOverview();
-  if (view === 'football-teams' && !state.football.teamData) loadFootballTeam();
-  if (view === 'football-players' && !state.football.playerData) loadFootballPlayer();
+  if (view === 'football-teams') loadFootballTeam();
+  if (view === 'football-players') loadFootballPlayer();
 }
 
 function bindNavigation() {
@@ -3404,7 +3404,9 @@ async function loadFootballTeam() {
 
   const teamId = select.value;
   if (!teamId) {
-    header.innerHTML = '<div class="loading">Selecione um time</div>';
+    header.innerHTML = '<div class="loading" style="text-align:center; padding: 40px;">Selecione um time acima para ver a análise.</div>';
+    kpis.innerHTML = '';
+    analysis.innerHTML = '';
     return;
   }
   header.innerHTML = '<div class="loading"><span class="spinner"></span>Carregando time…</div>';
@@ -3417,7 +3419,7 @@ async function loadFootballTeam() {
     renderFootballTeam(data);
   } catch (err) {
     console.error('football team error', err);
-    header.innerHTML = '<div class="loading">Erro ao carregar o time.</div>';
+    header.innerHTML = '<div class="loading" style="text-align:center; padding: 40px;">Erro ao carregar o time.</div>';
   }
 }
 
